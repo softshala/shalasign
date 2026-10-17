@@ -27,10 +27,10 @@ export const STORAGE_DIR = resolveStorageDir();
 fs.mkdirSync(STORAGE_DIR, { recursive: true });
 const db = new DatabaseSync(path.join(STORAGE_DIR, 'signflow.db'));
 db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA foreign_keys = OFF'); // we manage integrity in code; keeps migrations simple
 console.log(`SignFlow data folder: ${STORAGE_DIR}`);
 
-// Run several statements as one all-or-nothing unit (replaces better-sqlite3's
-// db.transaction). Usage: tx(() => { ...writes... });
+// Run several statements as one all-or-nothing unit.
 export function tx(fn) {
   db.exec('BEGIN');
   try {
@@ -70,6 +70,41 @@ CREATE TABLE IF NOT EXISTS login_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email);
 
+-- "Forgot password" links (single use, 1 hour).
+CREATE TABLE IF NOT EXISTS password_resets (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0
+);
+
+-- Per-user preferences: branding, defaults, webhook. One row per user.
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id TEXT PRIMARY KEY,
+  company TEXT DEFAULT '',
+  brand_color TEXT DEFAULT '',
+  logo_data TEXT DEFAULT '',                   -- data URL (PNG/JPG, small)
+  email_footer TEXT DEFAULT '',
+  default_expiry_days INTEGER DEFAULT 30,
+  default_reminder_days INTEGER DEFAULT 3,
+  webhook_url TEXT DEFAULT '',
+  webhook_secret TEXT DEFAULT '',
+  notify_on_view INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- API keys for integrations ("Authorization: Bearer sf_live_...").
+CREATE TABLE IF NOT EXISTS api_keys (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  prefix TEXT NOT NULL,                        -- first 12 chars, for display
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS onedrive_shares (
   drive_id TEXT NOT NULL,
   path TEXT NOT NULL,
@@ -85,6 +120,20 @@ CREATE TABLE IF NOT EXISTS folders (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Reusable templates: a PDF + signer roles + field layout.
+CREATE TABLE IF NOT EXISTS templates (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  pdf_path TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  roles_json TEXT NOT NULL DEFAULT '[]',       -- [{name:"Candidate", attachments:[...]}]
+  fields_json TEXT NOT NULL DEFAULT '[]',      -- [{type,page,x,y,w,h,label,signerIndex,required}]
+  options_json TEXT NOT NULL DEFAULT '{}',     -- {sequential, message, access_code, expiry_days, reminder_days, cc}
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  use_count INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS envelopes (
   id TEXT PRIMARY KEY,
   user_id TEXT REFERENCES users(id),
@@ -92,14 +141,26 @@ CREATE TABLE IF NOT EXISTS envelopes (
   access_code TEXT,
   title TEXT NOT NULL,
   message TEXT DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'draft',        -- draft | sent | completed | voided
+  status TEXT NOT NULL DEFAULT 'draft',        -- draft | sent | completed | voided | declined | expired
   original_pdf TEXT NOT NULL,
   final_pdf TEXT,
+  signer_pdf TEXT,
   sha256_original TEXT NOT NULL,
   sha256_final TEXT,
   sequential INTEGER NOT NULL DEFAULT 1,       -- 1 = signers sign in order
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  completed_at TEXT
+  sent_at TEXT,
+  completed_at TEXT,
+  expires_at TEXT,                             -- signing deadline (sent envelopes)
+  reminder_days INTEGER DEFAULT 0,             -- 0 = no automatic reminders
+  last_reminder_at TEXT,
+  cc_json TEXT DEFAULT '[]',                   -- [{name,email}] receive the completed copy
+  draft_json TEXT,                             -- autosaved Prepare state (signers/fields/options)
+  template_id TEXT,
+  seal_error TEXT,                             -- set when sealing failed; cleared on retry
+  archive_url TEXT,
+  archived_at TEXT,
+  page_count INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS signers (
@@ -110,11 +171,17 @@ CREATE TABLE IF NOT EXISTS signers (
   order_index INTEGER NOT NULL DEFAULT 0,
   token TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL DEFAULT 'pending',      -- pending | signed | declined
-  signature_image TEXT,                        -- data URL of drawn/typed signature
+  signature_image TEXT,                        -- data URL of drawn/typed signature (encrypted)
   consent_at TEXT,
   signed_at TEXT,
+  declined_at TEXT,
+  decline_reason TEXT,
   ip TEXT,
-  user_agent TEXT
+  user_agent TEXT,
+  private_message TEXT DEFAULT '',
+  viewed_at TEXT,
+  notified_at TEXT,
+  reminders_sent INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS fields (
@@ -126,6 +193,7 @@ CREATE TABLE IF NOT EXISTS fields (
   x REAL NOT NULL, y REAL NOT NULL,            -- normalized [0,1], top-left origin
   w REAL NOT NULL, h REAL NOT NULL,
   label TEXT DEFAULT '',
+  required INTEGER NOT NULL DEFAULT 1,
   value TEXT                                   -- filled at signing time
 );
 
@@ -149,20 +217,51 @@ CREATE TABLE IF NOT EXISTS audit_events (
   ip TEXT DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_audit_env ON audit_events(envelope_id);
+CREATE INDEX IF NOT EXISTS idx_env_user ON envelopes(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_signers_env ON signers(envelope_id);
+
+-- Outgoing webhook deliveries (for retries + visibility).
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  envelope_id TEXT,
+  event TEXT NOT NULL,
+  url TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_status INTEGER,
+  last_error TEXT,
+  delivered_at TEXT,
+  next_attempt_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
-// Upgrade older databases that predate newer columns.
-try { db.exec(`ALTER TABLE envelopes ADD COLUMN user_id TEXT REFERENCES users(id)`); } catch { /* exists */ }
-try { db.exec(`ALTER TABLE envelopes ADD COLUMN signer_pdf TEXT`); } catch { /* exists */ }
-try { db.exec(`ALTER TABLE envelopes ADD COLUMN folder_id TEXT`); } catch { /* exists */ }
-try { db.exec(`ALTER TABLE envelopes ADD COLUMN access_code TEXT`); } catch { /* exists */ }
-try { db.exec(`ALTER TABLE envelopes ADD COLUMN archive_url TEXT`); } catch { /* exists */ }   // OneDrive link of the sealed PDF
-try { db.exec(`ALTER TABLE envelopes ADD COLUMN archived_at TEXT`); } catch { /* exists */ }
+// Upgrade older databases that predate newer columns (ALTER is a no-op if present).
+const addColumn = (table, def) => { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${def}`); } catch { /* exists */ } };
+for (const def of [
+  'user_id TEXT REFERENCES users(id)', 'signer_pdf TEXT', 'folder_id TEXT', 'access_code TEXT',
+  'archive_url TEXT', 'archived_at TEXT', 'sent_at TEXT', 'expires_at TEXT', 'reminder_days INTEGER DEFAULT 0',
+  'last_reminder_at TEXT', "cc_json TEXT DEFAULT '[]'", 'draft_json TEXT', 'template_id TEXT', 'seal_error TEXT', 'page_count INTEGER',
+]) addColumn('envelopes', def);
+for (const def of ['declined_at TEXT', 'decline_reason TEXT', "private_message TEXT DEFAULT ''", 'viewed_at TEXT', 'notified_at TEXT', 'reminders_sent INTEGER NOT NULL DEFAULT 0']) addColumn('signers', def);
+addColumn('fields', 'required INTEGER NOT NULL DEFAULT 1');
 
 export default db;
 
 export function audit(envelopeId, type, actor, detail, ip = '') {
   db.prepare(
     `INSERT INTO audit_events (envelope_id, type, actor, detail, ip) VALUES (?, ?, ?, ?, ?)`
-  ).run(envelopeId, type, actor, detail, ip);
+  ).run(envelopeId, type, actor, detail ?? '', ip ?? '');
+}
+
+/** Settings row for a user, with defaults applied. */
+export function getSettings(userId) {
+  const row = db.prepare(`SELECT * FROM user_settings WHERE user_id = ?`).get(userId);
+  return {
+    company: '', brand_color: '', logo_data: '', email_footer: '',
+    default_expiry_days: 30, default_reminder_days: 3, webhook_url: '', webhook_secret: '', notify_on_view: 0,
+    ...(row || {}),
+  };
 }

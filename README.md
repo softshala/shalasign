@@ -1,13 +1,44 @@
-# SignFlow — a self-hosted e-signature platform (MVP)
+# SignFlow — a self-hosted e-signature platform
 
-A working clone of the core of Zoho Sign / HelloSign / Odoo Sign: upload a PDF, place
-signature fields, send signing links, capture drawn or typed signatures with consent,
-and seal the completed document with a stamped signature, a Certificate of Completion
-page, and a full audit trail.
+Upload a PDF, place signature fields, send signing links, capture drawn, typed
+or uploaded signatures with consent, and seal the completed document with
+stamped signatures, a Certificate of Completion and a full audit trail. Built
+to match the core of Adobe Acrobat Sign and Zoho Sign while keeping every
+document on infrastructure you control. See [docs/COMPARISON.md](docs/COMPARISON.md)
+for a feature-by-feature comparison and roadmap.
+
+## Features
+
+**Sending** — drag-and-drop field editor (signature, initials, date, text,
+checkbox; required/optional, labels, pre-filled values; resize and move),
+up to 10 signers with sequential or parallel routing, private message per
+signer, CC recipients, required attachments per signer (Aadhaar, PAN, custom),
+access codes, folders, **templates**, **bulk send** (up to 500 recipients, CSV
+import), **draft autosave**, signing **deadlines** and **automatic reminders**.
+
+**Signing** — no account needed; works on phones (touch drawing, sticky action
+bar, "next step" guidance); draw, type or upload a signature and remember it on
+the device; decline with a reason; download the signed copy; branded with the
+sender's logo and colour.
+
+**Tracking** — dashboard with stats, search, status/folder filters; per-signer
+status (notified, opened, signed, declined); remind now, resend link, change a
+signer's email, void, retry sealing; audit trail with IP and device.
+
+**Evidence** — stamped PDF + Certificate of Completion, SHA-256 of original and
+final, append-only audit log, AES-256 encryption at rest for every PDF,
+signature image and uploaded ID. Completed documents cannot be deleted.
+
+**Accounts** — email + password, Google and Microsoft sign-in, emailed one-time
+code login, password reset, login throttling, optional domain allow-list.
+
+**Integrations** — REST API with API keys, HMAC-signed webhooks with retries,
+automatic archive of sealed PDFs to OneDrive / SharePoint (one folder per
+sender, auto-shared with them).
 
 ## Stack
 
-- **Backend**: Node.js 22.5+ + Express, SQLite (built-in `node:sqlite`, no native build), pdf-lib, multer
+- **Backend**: Node.js 22.5+ + Express, SQLite (built-in `node:sqlite`, no native build), pdf-lib, multer, nodemailer
 - **Frontend**: React 18 + Vite, pdfjs-dist (in-browser PDF rendering), react-router
 
 ## Quick start
@@ -27,279 +58,185 @@ npm run dev          # → http://localhost:5173 (proxies /api to :4000)
 ```
 
 **Production-style run**: `cd client && npm run build`, then just run the server —
-it serves the built frontend itself at http://localhost:4000.
+it serves the built frontend itself at http://localhost:4000. On Mac/Windows,
+double-click `start-mac.command` / `START-WINDOWS.bat`.
+
+Open `/api/health` on any deployment to check that storage is persistent,
+email is configured and the encryption key comes from the environment.
+
+## Configuration
+
+Copy `server/.env.example` to `server/.env`. Everything is optional; the login
+page and the app only show what is configured.
+
+| Area | Variables |
+|---|---|
+| Public URL (used in emails and SSO redirects) | `APP_URL` |
+| Email (signing links, reminders, completion copies) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `FROM_EMAIL` |
+| Storage & encryption | `STORAGE_DIR` (persistent disk), `SIGNFLOW_SECRET` (AES key; otherwise a `secret.key` file is generated) |
+| HTTPS deployments | `COOKIE_SECURE=1`; behind a proxy `TRUST_PROXY=1` (automatic on Render) |
+| Google sign-in | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
+| Microsoft sign-in | `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT` |
+| Who may create accounts via SSO / code | `SSO_ALLOWED_DOMAINS=softshala.com` |
+| OneDrive / SharePoint archive | `ONEDRIVE_USER` or `ONEDRIVE_SITE`, `ONEDRIVE_FOLDER`, `ONEDRIVE_PATH`, `ONEDRIVE_TIMEZONE`, `ONEDRIVE_SHARE_WITH_SENDER` |
+| Local development | `OTP_DEV_LOG=1` prints login codes and reset links to the console instead of emailing; `DISABLE_SCHEDULER=1` turns off background jobs |
+
+Per-user settings (branding, default deadline and reminder cadence, webhook,
+API keys, "notify me when viewed") live in **Settings** inside the app.
 
 ## Security
 
 - **Encryption at rest** — every stored PDF (originals, sealed copies), every
-  signature image, and every uploaded ID document (Aadhaar/PAN) is encrypted on
-  disk with AES-256-GCM. A raw copy of the data folder is unreadable without the
-  key. The key is either `SIGNFLOW_SECRET` (set this in hosting, so the server's
-  disk and backups can't be read even if copied) or an auto-generated
-  `secret.key` locally.
-- **Passwords** are stored bcrypt-hashed (never in plain text). Login is
-  throttled after 5 failures; access-code entry is throttled after 8.
-- **Access code** optionally gates each document; share it out-of-band.
-- **Web layer** sends security headers, hides server internals, and enforces
-  HSTS when running on HTTPS (`COOKIE_SECURE=1`).
-- **What this does NOT replace:** on a laptop, turn on full-disk encryption
-  (FileVault on Mac, BitLocker on Windows) — that protects everything if the
-  device is lost. When hosted, HTTPS (automatic on Render) protects data in
-  transit. No system is unbreakable; these layers bring it to standard practice.
-- **Key + backups:** locally the `secret.key` lives in the data folder, so the
-  backup zip can restore everything. That means: protect your backup zips (they
-  contain the key). For the strongest hosted setup, set `SIGNFLOW_SECRET` as a
-  secret in the host dashboard, not in any file.
+  signature image and every uploaded ID document is encrypted on disk with
+  AES-256-GCM. The key is `SIGNFLOW_SECRET` (recommended when hosted) or an
+  auto-generated `secret.key` in the data folder.
+- **Passwords** are bcrypt-hashed. Login is throttled per email (5 failures →
+  15 min lock) and per IP. Access-code entry is throttled per signing link.
+- **Signing links** are 32-character random capability tokens; changing a
+  signer's email revokes the old link. **Access codes** optionally gate a
+  document; share them out-of-band.
+- **Web layer** sets security headers, trusts the proxy only when told to,
+  escapes everything placed in emails, validates PDFs at upload (corrupt or
+  password-protected files are rejected immediately), and limits signer
+  attachments to PDF/PNG/JPG under 10 MB server-side.
+- **What this does NOT replace:** on a laptop, turn on full-disk encryption.
+  When hosted, HTTPS protects data in transit. Protect your backup zips: locally
+  they contain the key.
 
 ## Your data is permanent (and how to back it up)
 
 All data — accounts, documents, signed PDFs, audit history — is stored in a
 folder called **SignFlowData** in your home folder (Mac: `~/SignFlowData`,
 Windows: `C:\Users\<you>\SignFlowData`), deliberately **outside** the app
-folder. This means you can delete and replace the whole `signflow` app folder
-to update the app and your data is never touched. (Hosted deployments use the
-`STORAGE_DIR` env var pointing at a persistent disk instead.)
+folder, so you can replace the app folder to update it. Hosted deployments use
+the `STORAGE_DIR` env var pointing at a persistent disk; the server prints a
+loud warning at startup (and `/api/health` reports it) if that disk is missing,
+because without it everything is erased on each deploy.
 
-Nothing digital is truly immortal on one machine (a disk can fail), so keep
-backups: double-click **backup-mac.command** / **BACKUP-WINDOWS.bat** to save a
-dated zip of everything to your Desktop, then copy that zip somewhere safe
-(another drive, Google Drive, email). To restore, unzip it back into your home
-folder. Once hosted online, the server's persistent disk plus the host's own
-backups cover this automatically.
+Double-click **backup-mac.command** / **BACKUP-WINDOWS.bat** to save a dated
+zip to your Desktop. With the OneDrive archive configured, every completed
+document is also copied into your Microsoft 365 tenant automatically.
 
-## Bulk send
+## Templates, bulk send, reminders, deadlines
 
-In the Prepare screen, switch to **Bulk send** to send one document to many
-people at once. Place your signature fields once, paste a recipient list
-(`Name, email` per line), and each person receives their own private copy and
-signing link — signed independently, tracked as separate documents.
-
-## Folders
-
-Group documents into folders (e.g. "Contractual NDA", "Offer Letter"). Create
-folders from the dashboard, assign a document to one when sending, and filter
-the dashboard by folder.
-
-## Secure authentication
-
-- **Login throttling** — after 5 failed logins for an email, that email is
-  locked for 15 minutes to stop password guessing.
-- **Signer access code** — optionally set a PIN on an envelope; signers must
-  enter it before they can open or sign the document (share it out-of-band,
-  e.g. by phone).
-
-## Per-signer required attachments
-
-When preparing an envelope the sender can require documents from any individual
-signer (Aadhaar card, PAN card, or a custom label). That signer cannot finish
-signing until they upload each required file (PNG/JPG/PDF, ≤10 MB). Uploaded
-documents are appended to the sealed PDF — images as captioned pages, PDFs
-copied in — and listed under that signer in the certificate.
-
-## Two certificate versions
-
-- **Sender's copy** (download from the envelope page): full Certificate of
-  Completion including the complete audit trail, plus attachments.
-- **Signers' copy** (emailed to each signer on completion): the same document
-  and the signers + their details, but **without** the audit-trail event log.
-
-## Accounts & login
-
-Senders create an account (name + email + password) at `/login` and must be
-logged in to upload, send, track, void or download envelopes. Each user sees
-only their own envelopes. Passwords are stored bcrypt-hashed; sessions are
-30-day httpOnly cookies (set `COOKIE_SECURE=1` in `.env` once the app runs
-on https). **Signers never need an account** — their emailed link is their key.
+- **Templates** — in Prepare, click *Save as template*. The PDF, signer roles,
+  field layout and options are saved; *Templates* → *Use template* creates a
+  pre-filled draft.
+- **Bulk send** — switch Prepare to *Bulk send*, paste `Name, email` lines or
+  import a CSV. Each recipient gets a private copy, tracked separately. Emails
+  go out in the background.
+- **Deadlines & reminders** — per document or as account defaults (Settings →
+  Sending defaults). Reminders go only to the signer whose turn it is, at most
+  10 per signer. Expired envelopes are closed and the sender is notified.
 
 ## Sign-in options: Google, Microsoft, emailed code
 
-Besides email + password, senders can sign in three more ways. Each one is
-switched on by environment variables and the login page only shows the methods
-that are configured. Accounts are matched by email address, so a colleague who
-signed up with a password can later use Google or a code with the same email.
-
 | Method | What to configure |
 |---|---|
-| **Emailed one-time code** | Nothing extra — works as soon as SMTP is set up. 6-digit code, valid 10 minutes, 5 attempts. For local development without SMTP set `OTP_DEV_LOG=1` and codes print in the server console. |
-| **Google** | Google Cloud console → *APIs & Services → Credentials → Create credentials → OAuth client ID → Web application*. Authorized redirect URI: `https://YOUR-APP/api/auth/sso/google/callback`. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. If the OAuth consent screen is in *Testing* mode, add your users as test users or publish it. |
-| **Microsoft** | entra.microsoft.com → *App registrations → New registration*. Platform *Web*, redirect URI `https://YOUR-APP/api/auth/sso/microsoft/callback`. Then *Certificates & secrets → New client secret* and copy its **Value**. Set `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, and `MS_TENANT` (your Directory/tenant ID to allow only your organisation, `organizations` for any work account, or `common` for any Microsoft account). |
+| **Emailed one-time code** | Nothing extra — works as soon as SMTP is set up. 6-digit code, valid 10 minutes, 5 attempts. |
+| **Google** | Google Cloud console → *APIs & Services → Credentials → OAuth client ID → Web application*. Redirect URI `https://YOUR-APP/api/auth/sso/google/callback`. Set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`. |
+| **Microsoft** | entra.microsoft.com → *App registrations → New registration*, platform *Web*, redirect URI `https://YOUR-APP/api/auth/sso/microsoft/callback`; *Certificates & secrets → New client secret* (copy the **Value**). Set `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT`. |
 
-`APP_URL` must be the exact public address, because the redirect URIs are built
-from it. For a company-internal deployment also set
-`SSO_ALLOWED_DOMAINS=softshala.com` so only your own domain can create accounts
-through these methods.
-
-Accounts created via Google/Microsoft/code have no password; the password form
-tells them so if they try it.
+Accounts are matched by email. Set `SSO_ALLOWED_DOMAINS` for a company-only
+deployment. Accounts created via SSO/code have no password; *Forgot password*
+lets them set one.
 
 ## OneDrive / SharePoint archive
 
-Every completed document can be copied automatically to Microsoft 365, so the
-signed PDFs live in a place your team already backs up and searches. The copy is
-the **sender's sealed PDF** (stamped signatures + Certificate of Completion +
-audit trail).
-
-**Default layout — one archive account, a private folder per sender.** Point
-`ONEDRIVE_USER` at a single account (e.g. `shubham@softshala.com`). Each
-sender gets a folder named after them, and every file is named by completion
-date, time and the signer's name. SignFlow shares each sender's folder with that
-sender (read-only, sign-in required) the first time something lands in it, so
-the account owner sees everything and each sender sees only their own:
+Every completed document is copied to Microsoft 365 as the **sender's sealed
+PDF** (signatures + certificate + audit trail). Default layout with one archive
+account (`ONEDRIVE_USER=shubham@softshala.com`):
 
 ```
 SignFlow/
-  Shubham Sharma/                  ← shared with shubham@softshala.com only
+  Shubham Sharma/                  ← shared read-only with shubham@softshala.com
     2026-10-17_14-32-05_Asha Verma.pdf
-    2026-10-18_09-05-41_Rohit Jain.pdf
-  Priya Mehta/                     ← shared with priya@softshala.com only
-    ...
+  Priya Mehta/                     ← shared with priya@softshala.com
 ```
 
-Times are in `ONEDRIVE_TIMEZONE` (default `Asia/Kolkata`). The naming is a
-template, `ONEDRIVE_PATH`, defaulting to `{sender_name}/{date}_{time}_{signer}`;
-tokens are `{sender_name} {sender_email} {folder} {title} {id} {date} {time}
-{signer} {signer_first} {signer_last} {signers}`, slashes create sub-folders and
-`.pdf` is appended. For example `{sender_name}/{folder}/{date}_{title}` groups
-by SignFlow folder and keeps the document title.
+Times use `ONEDRIVE_TIMEZONE` (default `Asia/Kolkata`). The naming template
+`ONEDRIVE_PATH` defaults to `{sender_name}/{date}_{time}_{signer}`; tokens:
+`{sender_name} {sender_email} {folder} {title} {id} {date} {time} {signer}
+{signer_first} {signer_last} {signers}`. `ONEDRIVE_USER=@sender` archives into
+each sender's own OneDrive; `ONEDRIVE_SITE=…sharepoint.com/sites/Contracts`
+uses a SharePoint library.
 
-Alternatives: `ONEDRIVE_USER=@sender` archives into each sender's **own**
-OneDrive instead (they must be users in your tenant; no sharing needed, flat
-layout by default); `ONEDRIVE_SITE=...sharepoint.com/sites/Contracts` uses a
-SharePoint library with the same layout and sharing.
+Setup: in the Microsoft app registration add the Graph **Application**
+permission `Files.ReadWrite.All` (or `Sites.ReadWrite.All` for SharePoint) and
+grant admin consent. These app-only permissions are tenant-wide; for least
+privilege use `Sites.Selected`.
 
-The envelope page shows an **Open in OneDrive** link once archived, and a
-**Copy to OneDrive** button to retry if an upload failed. The audit trail
-records `archive.onedrive`, `archive.shared`, and any `archive.failed` /
-`archive.share_failed`. The original data on SignFlow's own disk is unchanged —
-OneDrive is an extra copy, not a move.
+## API
 
-**Setup (reuses the Microsoft sign-in app registration):**
-
-1. In entra.microsoft.com → *App registrations → SignFlow → API permissions →
-   Add a permission → Microsoft Graph → **Application permissions*** add
-   `Files.ReadWrite.All` (to archive into a user's OneDrive) **or**
-   `Sites.ReadWrite.All` (to archive into a SharePoint site). Click
-   **Grant admin consent**.
-2. Set the destination env var: `ONEDRIVE_USER=archive@softshala.com` *or*
-   `ONEDRIVE_SITE=softshala.sharepoint.com/sites/Contracts`. Optionally
-   `ONEDRIVE_FOLDER` (default `SignFlow`). `MS_TENANT`, `MS_CLIENT_ID` and
-   `MS_CLIENT_SECRET` must already be set.
-
-Note on scope: these are *application* permissions, which let the server write
-to **every** OneDrive (`Files.ReadWrite.All`) or **every** site
-(`Sites.ReadWrite.All`) in the tenant, not just the one you point it at. That
-is how Microsoft Graph app-only access works. Keep the client secret in Render's
-Environment tab only. If your IT policy requires least privilege, use
-`Sites.Selected` and grant the app access to one site via PowerShell; the code
-needs no change for that.
-
-## How the product works (the "reverse-engineered" model)
-
-Every e-sign platform is built around the same five concepts:
-
-1. **Envelope** — a container for one document + its signers + its fields + its
-   lifecycle (`draft → sent → completed`, or `voided`). The original PDF's SHA-256
-   is recorded at upload so tampering is detectable.
-2. **Fields** — rectangles placed on the document by the sender (signature,
-   initials, date, text, checkbox), each assigned to a signer. Stored as
-   *normalized* coordinates (0–1, top-left origin) so they are resolution-independent;
-   converted to PDF points (bottom-left origin) only at sealing time.
-3. **Signing ceremony** — each signer gets a long random **capability token** in
-   their URL (this is exactly how HelloSign/Zoho "no-account signing" links work).
-   The ceremony enforces: it must be your turn (sequential routing), you must
-   tick the **ESIGN/IT-Act consent** checkbox, and you must adopt a signature
-   (drawn on canvas or typed and rendered to an image).
-4. **Sealing** — when the last signer finishes, the server stamps every field
-   into the PDF with pdf-lib, appends a **Certificate of Completion** page
-   (signers, consent timestamps, IPs, user agents, full event log), saves the
-   final PDF and records its SHA-256.
-5. **Audit trail** — an append-only `audit_events` table records every
-   created/sent/viewed/consented/signed/completed/sealed/voided event with actor,
-   IP and timestamp. This is what gives an e-signature its evidentiary weight.
-
-## API surface
+Create a key in *Settings → API & webhooks* and send it as
+`Authorization: Bearer sf_live_…`. The API is the same one the app uses.
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | `/api/auth/providers` | Which sign-in methods are configured |
-| GET | `/api/auth/sso/:provider` → `/callback` | Google / Microsoft sign-in (`google`, `microsoft`) |
-| POST | `/api/auth/otp/request` / `verify` | Emailed one-time code login |
-| POST | `/api/envelopes` | Upload PDF (multipart `pdf`), create draft |
-| POST | `/api/envelopes/:id/send` | Attach signers + fields, generate signing links |
-| GET | `/api/envelopes` / `/:id` | List / detail incl. signers, fields, audit log |
-| GET | `/api/envelopes/:id/pdf` | Original PDF (for the field editor) |
-| GET | `/api/envelopes/:id/download` | Final sealed PDF |
-| POST | `/api/envelopes/:id/archive` | Copy sealed PDF to OneDrive/SharePoint (retry) |
-| POST | `/api/envelopes/:id/void` | Void an in-flight envelope |
-| GET | `/api/sign/:token` | Signer's view (fields, turn status; logs "viewed") |
-| GET | `/api/sign/:token/pdf` | PDF for the signing ceremony |
-| POST | `/api/sign/:token` | Submit consent + signature + field values |
+| GET | `/api/health` | Deployment health (storage, email, key source) |
+| POST | `/api/envelopes` | Upload PDF (multipart `pdf`, optional `title`, `message`) → draft |
+| GET | `/api/envelopes?q=&status=&folder=&sort=&limit=&offset=` | List with search/filters |
+| GET | `/api/envelopes/stats` | Counts, completed last 30 days, avg hours to sign |
+| GET / PATCH / DELETE | `/api/envelopes/:id` | Detail incl. signers, fields, events, attachments / rename / delete (not completed) |
+| PUT | `/api/envelopes/:id/draft` | Autosave Prepare state |
+| POST | `/api/envelopes/:id/send` | `{signers:[{name,email,attachments?,private_message?}], fields:[…], sequential?, folder_id?, access_code?, expiry_days?, reminder_days?, cc?:[{name,email}], title?, message?}` |
+| POST | `/api/envelopes/:id/bulk-send` | `{recipients:[{name,email}], fields, attachments?, …}` |
+| POST | `/api/envelopes/:id/void` · `/remind` · `/seal` · `/archive` | Lifecycle actions |
+| POST / PATCH | `/api/envelopes/:id/signers/:sid/resend` · `/api/envelopes/:id/signers/:sid` | Resend link / change name+email (new link) |
+| GET | `/api/envelopes/:id/download[?copy=signer]` · `/original` · `/pdf` · `/attachments/:aid` | Files |
+| GET / POST / DELETE | `/api/folders`, `/api/folders/:id` | Folders |
+| GET / POST / PATCH / DELETE | `/api/templates`, `/api/templates/:id`, `/api/templates/:id/use` | Templates |
+| GET / PUT | `/api/settings` · `/api/settings/password` · `/api/settings/api-keys` · `/api/settings/webhook/test` | Account settings |
+| GET | `/api/sign/:token` · `/pdf` · `/download` | Signer's view / PDF / signed copy |
+| POST | `/api/sign/:token` · `/decline` | Submit consent + signature + values + attachments / decline |
+
+Fields: `{type: signature|initials|date|text|checkbox, page (0-based), x, y, w, h (normalized 0–1, top-left origin), signerIndex, label?, required?, prefill?}`.
+
+**Webhooks** POST `{event, created_at, data}` with events `envelope.sent`,
+`envelope.completed`, `envelope.declined`, `envelope.voided`,
+`envelope.expired`; header `X-SignFlow-Signature: sha256=<HMAC of body with your secret>`.
+Failed deliveries retry 5 times with back-off.
 
 ## Project layout
 
 ```
-server/
-  src/index.js   – Express app, all routes, sealing orchestration
-  src/db.js      – SQLite schema (users, sessions, login_codes, envelopes, signers, fields, audit_events)
-  src/auth.js    – accounts, sessions, password login
-  src/sso.js     – Google / Microsoft sign-in (OpenID Connect + PKCE)
-  src/otp.js     – emailed one-time code login
-  src/onedrive.js – Microsoft Graph upload of sealed PDFs to OneDrive/SharePoint
-  src/pdf.js     – pdf-lib stamping + Certificate of Completion + SHA-256
-client/
-  src/pages/Dashboard.jsx       – envelope list + upload
-  src/pages/Prepare.jsx         – drag-and-drop field editor (sender)
-  src/pages/SignPage.jsx        – signing ceremony (signer)
-  src/pages/EnvelopeDetail.jsx  – tracking + audit trail + download
-  src/components/PdfViewer.jsx  – pdfjs page renderer with field overlays
-  src/components/SignatureModal.jsx – draw/type signature capture
+server/src/
+  index.js      – Express app, health, static frontend, scheduler start
+  auth.js       – accounts, sessions, password login/reset, API-key auth
+  sso.js        – Google / Microsoft sign-in (OpenID Connect + PKCE)
+  otp.js        – emailed one-time code login
+  settings.js   – profile, branding, defaults, webhook, API keys
+  envelopes.js  – sender routes: upload, list, send, bulk, lifecycle
+  signing.js    – signer routes: view, sign, decline, download
+  templates.js  – reusable templates
+  fields.js     – field layout validation
+  complete.js   – notify signers, seal, completion emails, webhook, archive
+  scheduler.js  – reminders, expiry, webhook retries, housekeeping
+  webhooks.js   – signed webhook delivery queue
+  pdf.js        – pdf-lib stamping (rotation-aware), certificate, validation
+  onedrive.js   – Microsoft Graph archive
+  mailer.js     – branded, escaped email templates
+  crypto.js     – AES-256-GCM at rest
+  db.js         – SQLite schema + migrations
+client/src/
+  pages/        – Dashboard, Prepare, SignPage, EnvelopeDetail, Templates, Settings, AuthPage
+  components/   – PdfViewer (responsive), SignatureModal (draw/type/upload/saved), Layout, Toast
 ```
 
-## Email delivery (free)
+## Deployment
 
-Email is built in via nodemailer and configured from `server/.env`
-(copy `server/.env.example`). Two free options:
+See [DEPLOY.md](DEPLOY.md) for the plain-language Render guide. The essentials:
+a **persistent disk** mounted where `STORAGE_DIR` points, `SIGNFLOW_SECRET` set
+as a secret, `APP_URL` set to the public address, and SMTP variables. Check
+`/api/health` after deploying. Oracle Cloud "Always Free" is the no-cost
+alternative with a real disk.
 
-- **Gmail SMTP** — free, ~500 emails/day. Enable 2-Step Verification, create an
-  App Password at https://myaccount.google.com/apppasswords, put it in `.env`.
-- **Brevo** (brevo.com) — free 300 emails/day, works with any sender address
-  you verify.
+## Roadmap
 
-Set `APP_URL` to the public URL of your deployment so emailed links work.
-Behavior: on send, the first signer (or all, if parallel) gets a signing-link
-email; each next signer is emailed when their turn comes; when everyone has
-signed, all signers receive the sealed PDF with its certificate of completion.
-Without `.env`, nothing breaks — links are shown in the UI to share manually.
-
-## Free hosting
-
-- **Oracle Cloud "Always Free" VM** — the only genuinely free option with
-  persistent disk and no sleeping. Create an Always Free ARM VM (Ubuntu),
-  `apt install nodejs npm nginx`, clone the app, `npm run build` in client,
-  run the server with pm2, point a free DuckDNS subdomain at it, and add a free
-  Let's Encrypt cert (`certbot --nginx`). Set `APP_URL` to that https URL.
-- **Render.com free tier** — much easier (connect a GitHub repo and it deploys),
-  but the free tier has no persistent disk and sleeps after 15 min idle: your
-  SQLite data and uploaded PDFs are wiped on every restart/redeploy. Fine for
-  demos, not for real signed documents unless you add a free Postgres
-  (Neon/Supabase) and free object storage (Cloudflare R2).
-
-## What this MVP deliberately leaves out (your roadmap)
-
-- **Reminders & expiry** — scheduled re-send emails for unsigned envelopes.
-- **Password reset & teams** — "forgot password" emails, org/team workspaces
-  where colleagues share visibility of envelopes, roles/permissions.
-- **Templates & bulk send** — save field layouts for reuse; CSV bulk send.
-- **Cryptographic (PAdES) seals** — currently sealing = flattened stamps + hash +
-  audit page (what most Zoho Sign/HelloSign envelopes effectively give you at the
-  evidence level). To get Adobe's green "signature valid" checkmark, add a PKCS#7
-  digital signature with an org certificate — easiest via pyHanko (Python sidecar)
-  or Java iText; Node options exist ("@signpdf/signpdf") but handle fewer edge cases.
-  Aadhaar eSign / eIDAS qualified signatures plug in at this same layer.
-- **Webhooks & API keys** — so other systems can create envelopes and get
-  completion callbacks (this is most of DocuSign's enterprise value).
-- **Storage & scale** — swap local disk → S3, SQLite → Postgres; add rate limiting
-  and virus scanning on uploads.
+Email OTP for signers · multiple documents per envelope · text-tag field
+placement · public web forms · PAdES digital seal / Aadhaar eSign · radio and
+dropdown fields · localisation · DOCX/image upload. Details and reasoning in
+[docs/COMPARISON.md](docs/COMPARISON.md).
 
 ## Legal notes (not legal advice)
 

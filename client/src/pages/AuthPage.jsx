@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
+import { api } from '../api.js';
 
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
@@ -16,76 +17,53 @@ const MicrosoftIcon = () => (
   </svg>
 );
 
-export default function AuthPage() {
-  const [mode, setMode] = useState('login');          // 'login' | 'signup' | 'otp'
+export default function AuthPage({ mode: initialMode = 'login' }) {
+  const { token: resetToken } = useParams();
+  const [mode, setMode] = useState(initialMode);          // login | signup | otp | forgot | reset
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [otp, setOtp] = useState({ step: 'email', code: '', newAccount: false, cooldown: 0 });
-  const [providers, setProviders] = useState(null);   // { password, google, microsoft, otp }
+  const [providers, setProviders] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
 
   useEffect(() => {
-    fetch('/api/auth/providers').then((r) => r.json()).then(setProviders).catch(() => setProviders({ password: true }));
-    // SSO failures come back as /login?error=...
+    api('/api/auth/providers').then(setProviders).catch(() => setProviders({ password: true }));
     const err = new URLSearchParams(window.location.search).get('error');
-    if (err) { setError(err); window.history.replaceState({}, '', '/login'); }
+    if (err) { setError(err); window.history.replaceState({}, '', window.location.pathname); }
   }, []);
 
-  // Resend cooldown ticker for the OTP step.
   useEffect(() => {
     if (otp.cooldown <= 0) return;
     const t = setTimeout(() => setOtp((o) => ({ ...o, cooldown: o.cooldown - 1 })), 1000);
     return () => clearTimeout(t);
   }, [otp.cooldown]);
 
-  const post = async (url, body) => {
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    let data = {};
-    try { data = await res.json(); } catch { /* non-JSON error */ }
-    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-    return data;
+  const run = async (fn) => {
+    setError(''); setBusy(true);
+    try { await fn(); } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
-
   const switchMode = (m) => { setMode(m); setError(''); setNotice(''); setOtp({ step: 'email', code: '', newAccount: false, cooldown: 0 }); };
 
-  const submitPassword = async (e) => {
-    e.preventDefault();
-    setError(''); setBusy(true);
-    try {
-      await post(`/api/auth/${mode === 'login' ? 'login' : 'signup'}`, form);
-      nav('/');
-    } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
-  };
-
-  const requestCode = async (e) => {
-    e?.preventDefault();
-    setError(''); setNotice(''); setBusy(true);
-    try {
-      const d = await post('/api/auth/otp/request', { email: form.email });
-      setOtp({ step: 'code', code: '', newAccount: d.new_account, cooldown: 60 });
-      setNotice(`We emailed a 6-digit code to ${form.email.trim()}. It expires in ${d.expires_in_minutes} minutes.`);
-    } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
-  };
-
-  const verifyCode = async (e) => {
-    e.preventDefault();
-    setError(''); setBusy(true);
-    try {
-      await post('/api/auth/otp/verify', { email: form.email, code: otp.code, name: form.name });
-      nav('/');
-    } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
-  };
+  const submitPassword = (e) => { e.preventDefault(); run(async () => { await api(`/api/auth/${mode === 'login' ? 'login' : 'signup'}`, { method: 'POST', body: form }); nav('/'); }); };
+  const requestCode = (e) => { e?.preventDefault(); run(async () => {
+    const d = await api('/api/auth/otp/request', { method: 'POST', body: { email: form.email } });
+    setOtp({ step: 'code', code: '', newAccount: d.new_account, cooldown: 60 });
+    setNotice(`We emailed a 6-digit code to ${form.email.trim()}. It expires in ${d.expires_in_minutes} minutes.`);
+  }); };
+  const verifyCode = (e) => { e.preventDefault(); run(async () => { await api('/api/auth/otp/verify', { method: 'POST', body: { email: form.email, code: otp.code, name: form.name } }); nav('/'); }); };
+  const forgot = (e) => { e.preventDefault(); run(async () => { await api('/api/auth/forgot', { method: 'POST', body: { email: form.email } }); setNotice(`If an account exists for ${form.email.trim()}, a reset link is on its way. Check your inbox (and spam).`); }); };
+  const reset = (e) => { e.preventDefault(); run(async () => { await api('/api/auth/reset', { method: 'POST', body: { token: resetToken, password: form.password } }); nav('/'); }); };
 
   const hasSso = providers?.google || providers?.microsoft;
-  const heading = mode === 'signup' ? 'Create your account' : mode === 'otp' ? 'Sign in with a code' : 'Welcome back';
-  const sub = mode === 'signup' ? 'Start sending documents for signature.'
-    : mode === 'otp' ? 'No password needed — we\'ll email you a one-time code.'
-    : 'Log in to send and track documents.';
+  const headings = {
+    login: ['Welcome back', 'Log in to send and track documents.'],
+    signup: ['Create your account', 'Start sending documents for signature.'],
+    otp: ['Sign in with a code', "No password needed — we'll email you a one-time code."],
+    forgot: ['Reset your password', "Enter your email and we'll send a reset link."],
+    reset: ['Choose a new password', 'At least 8 characters.'],
+  }[mode];
 
   return (
     <div className="auth-wrap">
@@ -95,10 +73,10 @@ export default function AuthPage() {
           <h1 className="auth-headline">Get documents signed,<br />without the friction.</h1>
           <p className="auth-sub">Upload a PDF, place signature fields, and send. Signers sign from any device — no account needed. Every completed document comes sealed with a tamper-evident certificate.</p>
           <ul className="auth-points">
+            <li>✓ Templates, reminders and deadlines</li>
             <li>✓ Send to one person or hundreds at once</li>
             <li>✓ Require ID documents from specific signers</li>
-            <li>✓ Organize everything into folders</li>
-            <li>✓ Protect sensitive documents with an access code</li>
+            <li>✓ Automatic archive to OneDrive / SharePoint</li>
           </ul>
         </div>
         <div className="auth-foot">Softshala Technologies</div>
@@ -107,57 +85,41 @@ export default function AuthPage() {
       <div className="auth-form-side">
         <div className="auth-card">
           <div className="auth-logo mobile-only" style={{ marginBottom: 18 }}>✒️ SignFlow</div>
-          <h2 style={{ margin: '0 0 4px' }}>{heading}</h2>
-          <p className="muted" style={{ marginTop: 0, marginBottom: 20 }}>{sub}</p>
+          <h2 style={{ margin: '0 0 4px' }}>{headings[0]}</h2>
+          <p className="muted" style={{ marginTop: 0, marginBottom: 20 }}>{headings[1]}</p>
 
-          {/* --- Single sign-on buttons --- */}
-          {hasSso && mode !== 'otp' && (
+          {hasSso && (mode === 'login' || mode === 'signup') && (
             <>
-              {providers.google && (
-                <a className="sso-btn" href="/api/auth/sso/google"><GoogleIcon /> Continue with Google</a>
-              )}
-              {providers.microsoft && (
-                <a className="sso-btn" href="/api/auth/sso/microsoft"><MicrosoftIcon /> Continue with Microsoft</a>
-              )}
+              {providers.google && <a className="sso-btn" href="/api/auth/sso/google"><GoogleIcon /> Continue with Google</a>}
+              {providers.microsoft && <a className="sso-btn" href="/api/auth/sso/microsoft"><MicrosoftIcon /> Continue with Microsoft</a>}
               <div className="divider">or</div>
             </>
           )}
 
-          {/* --- Email + password --- */}
-          {mode !== 'otp' && (
+          {(mode === 'login' || mode === 'signup') && (
             <form onSubmit={submitPassword}>
               {mode === 'signup' && (
-                <label className="field">
-                  <span>Full name</span>
-                  <input placeholder="Your name" value={form.name} autoComplete="name"
-                    onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+                <label className="field"><span>Full name</span>
+                  <input placeholder="Your name" value={form.name} autoComplete="name" onChange={(e) => setForm({ ...form, name: e.target.value })} required />
                 </label>
               )}
-              <label className="field">
-                <span>Work email</span>
-                <input type="email" placeholder="you@company.com" value={form.email} autoComplete="email"
-                  onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+              <label className="field"><span>Work email</span>
+                <input type="email" placeholder="you@company.com" value={form.email} autoComplete="email" onChange={(e) => setForm({ ...form, email: e.target.value })} required />
               </label>
               <label className="field">
-                <span>Password</span>
+                <span className="row spread">Password {mode === 'login' && providers?.password_reset && <a href="#" className="small" style={{ fontWeight: 400 }} onClick={(e) => { e.preventDefault(); switchMode('forgot'); }}>Forgot password?</a>}</span>
                 <input type="password" placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'} value={form.password}
-                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })} required minLength={mode === 'signup' ? 8 : undefined} />
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} onChange={(e) => setForm({ ...form, password: e.target.value })} required minLength={mode === 'signup' ? 8 : undefined} />
               </label>
               {error && <p className="error">{error}</p>}
-              <button className="auth-submit" disabled={busy}>
-                {busy ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}
-              </button>
+              <button className="auth-submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}</button>
             </form>
           )}
 
-          {/* --- One-time code --- */}
           {mode === 'otp' && otp.step === 'email' && (
             <form onSubmit={requestCode}>
-              <label className="field">
-                <span>Work email</span>
-                <input type="email" placeholder="you@company.com" value={form.email} autoComplete="email" autoFocus
-                  onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+              <label className="field"><span>Work email</span>
+                <input type="email" placeholder="you@company.com" value={form.email} autoComplete="email" autoFocus onChange={(e) => setForm({ ...form, email: e.target.value })} required />
               </label>
               {error && <p className="error">{error}</p>}
               <button className="auth-submit" disabled={busy}>{busy ? 'Sending…' : 'Email me a code'}</button>
@@ -167,44 +129,53 @@ export default function AuthPage() {
             <form onSubmit={verifyCode}>
               {notice && <p className="notice">{notice}</p>}
               {otp.newAccount && (
-                <label className="field">
-                  <span>Your name <span className="muted" style={{ fontWeight: 400 }}>(this email is new to SignFlow)</span></span>
-                  <input placeholder="Your name" value={form.name} autoComplete="name"
-                    onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+                <label className="field"><span>Your name <span className="muted" style={{ fontWeight: 400 }}>(this email is new to SignFlow)</span></span>
+                  <input placeholder="Your name" value={form.name} autoComplete="name" onChange={(e) => setForm({ ...form, name: e.target.value })} required />
                 </label>
               )}
-              <label className="field">
-                <span>6-digit code</span>
-                <input className="otp-input" inputMode="numeric" pattern="[0-9]*" maxLength={6} placeholder="••••••" autoFocus
-                  autoComplete="one-time-code" value={otp.code}
+              <label className="field"><span>6-digit code</span>
+                <input className="otp-input" inputMode="numeric" pattern="[0-9]*" maxLength={6} placeholder="••••••" autoFocus autoComplete="one-time-code" value={otp.code}
                   onChange={(e) => setOtp({ ...otp, code: e.target.value.replace(/\D/g, '').slice(0, 6) })} required />
               </label>
               {error && <p className="error">{error}</p>}
               <button className="auth-submit" disabled={busy || otp.code.length !== 6}>{busy ? 'Checking…' : 'Sign in'}</button>
               <p className="muted" style={{ textAlign: 'center', marginTop: 12 }}>
-                {otp.cooldown > 0
-                  ? `Resend code in ${otp.cooldown}s`
-                  : <a href="#" onClick={(e) => { e.preventDefault(); requestCode(); }}>Resend code</a>}
-                {' · '}
-                <a href="#" onClick={(e) => { e.preventDefault(); setOtp({ ...otp, step: 'email', code: '' }); setError(''); setNotice(''); }}>Change email</a>
+                {otp.cooldown > 0 ? `Resend code in ${otp.cooldown}s` : <a href="#" onClick={(e) => { e.preventDefault(); requestCode(); }}>Resend code</a>}
+                {' · '}<a href="#" onClick={(e) => { e.preventDefault(); setOtp({ ...otp, step: 'email', code: '' }); setError(''); setNotice(''); }}>Change email</a>
               </p>
             </form>
           )}
 
-          {/* --- Mode switches --- */}
+          {mode === 'forgot' && (
+            <form onSubmit={forgot}>
+              {notice ? <p className="notice ok">{notice}</p> : (
+                <label className="field"><span>Work email</span>
+                  <input type="email" placeholder="you@company.com" value={form.email} autoComplete="email" autoFocus onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+                </label>
+              )}
+              {error && <p className="error">{error}</p>}
+              {!notice && <button className="auth-submit" disabled={busy}>{busy ? 'Sending…' : 'Send reset link'}</button>}
+            </form>
+          )}
+
+          {mode === 'reset' && (
+            <form onSubmit={reset}>
+              <label className="field"><span>New password</span>
+                <input type="password" placeholder="At least 8 characters" value={form.password} autoComplete="new-password" autoFocus minLength={8} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+              </label>
+              {error && <p className="error">{error}</p>}
+              <button className="auth-submit" disabled={busy}>{busy ? 'Saving…' : 'Set password and log in'}</button>
+            </form>
+          )}
+
           <p className="muted" style={{ textAlign: 'center', marginTop: 18 }}>
-            {mode === 'login' && (
-              <>
-                {providers?.otp && <><a href="#" onClick={(e) => { e.preventDefault(); switchMode('otp'); }}>Log in with an emailed code</a><br /></>}
-                Don't have an account? <a href="#" onClick={(e) => { e.preventDefault(); switchMode('signup'); }}>Create one</a>
-              </>
-            )}
-            {mode === 'signup' && (
-              <>Already have an account? <a href="#" onClick={(e) => { e.preventDefault(); switchMode('login'); }}>Log in</a></>
-            )}
-            {mode === 'otp' && (
-              <><a href="#" onClick={(e) => { e.preventDefault(); switchMode('login'); }}>Use a password instead</a></>
-            )}
+            {mode === 'login' && (<>
+              {providers?.otp && <><a href="#" onClick={(e) => { e.preventDefault(); switchMode('otp'); }}>Log in with an emailed code</a><br /></>}
+              Don't have an account? <a href="#" onClick={(e) => { e.preventDefault(); switchMode('signup'); }}>Create one</a>
+            </>)}
+            {mode === 'signup' && (<>Already have an account? <a href="#" onClick={(e) => { e.preventDefault(); switchMode('login'); }}>Log in</a></>)}
+            {(mode === 'otp' || mode === 'forgot') && (<a href="#" onClick={(e) => { e.preventDefault(); switchMode('login'); }}>Back to log in</a>)}
+            {mode === 'reset' && (<Link to="/login">Back to log in</Link>)}
           </p>
         </div>
       </div>

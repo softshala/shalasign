@@ -30,6 +30,12 @@ Render runs your app on their computers and gives it an https address.
 4. Wait for the deploy to finish (a few minutes). Open the address — you'll
    see the SignFlow login screen. That address now works for everyone,
    everywhere, phones included.
+5. **Check the health page**: open `https://your-address/api/health`. It must
+   say `"storage_is_persistent_disk": true` and `"warnings": []`. If it warns
+   about storage, the disk is missing: in the service go to **Disks → Add
+   Disk** (mount path `/opt/render/project/src/server/data-disk`, 1 GB) and in
+   **Environment** add `STORAGE_DIR` with that same path. Without this, every
+   deploy erases all accounts and documents.
 
 ### About the cost
 
@@ -46,6 +52,14 @@ the README has notes for them.
 In Render → Settings → Custom Domains you can attach `sign.softshala.com`.
 Whoever manages the softshala.com domain adds one DNS record (Render shows
 exactly what). Then update APP_URL to the new address.
+
+## Optional extras (all in the Environment tab)
+
+- **Google / Microsoft sign-in**: `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`,
+  `MS_CLIENT_ID`/`MS_CLIENT_SECRET`/`MS_TENANT` — setup steps in the README.
+- **Company-only accounts**: `SSO_ALLOWED_DOMAINS=softshala.com`.
+- **OneDrive archive of signed documents**: `ONEDRIVE_USER=someone@softshala.com`
+  (plus a Graph permission on the Microsoft app — see README).
 
 ## Afterwards
 

@@ -1,6 +1,9 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { nanoid } from 'nanoid';
 import db from './db.js';
+import { appUrl, mailEnabled, sendPasswordReset } from './mailer.js';
+import { clientIp, makeLimiter, validEmail } from './util.js';
 
 const SESSION_DAYS = 30;
 const COOKIE = 'sf_session';
@@ -36,11 +39,12 @@ export function findOrCreateUser(email, name) {
   return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id);
 }
 
-// Simple in-memory brute-force protection: after too many failed logins for an
-// email, lock that email for a cooldown window.
+// Brute-force protection: per-email lockout after repeated failures AND a
+// per-IP ceiling so one address can't lock everyone out or spray passwords.
 const MAX_FAILS = 5;
 const LOCK_MS = 15 * 60 * 1000;
 const fails = new Map(); // email -> { count, until }
+const ipLimiter = makeLimiter(60, 15 * 60 * 1000);
 
 function throttleState(email) {
   const f = fails.get(email);
@@ -52,22 +56,33 @@ function recordFail(email) {
   f.count += 1;
   if (f.count >= MAX_FAILS) { f.until = Date.now() + LOCK_MS; f.count = 0; }
   fails.set(email, f);
+  if (fails.size > 10000) fails.clear();
 }
 function clearFails(email) { fails.delete(email); }
 
+const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, has_password: u.password_hash !== NO_PASSWORD });
+
 export function registerAuthRoutes(app) {
+  // Shared per-IP limiter for all auth endpoints.
+  app.use('/api/auth', (req, res, next) => {
+    if (req.method === 'GET') return next();
+    if (!ipLimiter(clientIp(req))) return res.status(429).json({ error: 'Too many requests from this network. Try again in a few minutes.' });
+    next();
+  });
+
   app.post('/api/auth/signup', (req, res) => {
     const { name, email, password } = req.body || {};
     if (!name?.trim() || !email?.trim() || !password) return res.status(400).json({ error: 'Name, email and password are required' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Please enter a valid email address' });
-    const existing = db.prepare(`SELECT id FROM users WHERE email = ?`).get(email.toLowerCase().trim());
+    if (!validEmail(email)) return res.status(400).json({ error: 'Please enter a valid email address' });
+    const key = email.toLowerCase().trim();
+    const existing = db.prepare(`SELECT id FROM users WHERE email = ?`).get(key);
     if (existing) return res.status(409).json({ error: 'An account with this email already exists — try logging in' });
     const id = nanoid(10);
     db.prepare(`INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)`)
-      .run(id, name.trim(), email.toLowerCase().trim(), bcrypt.hashSync(password, 10));
+      .run(id, name.trim().slice(0, 80), key, bcrypt.hashSync(password, 10));
     startSession(res, id);
-    res.json({ id, name: name.trim(), email: email.toLowerCase().trim() });
+    res.json({ id, name: name.trim(), email: key, has_password: true });
   });
 
   app.post('/api/auth/login', (req, res) => {
@@ -80,7 +95,7 @@ export function registerAuthRoutes(app) {
     }
     const user = db.prepare(`SELECT * FROM users WHERE email = ?`).get(key);
     if (user && user.password_hash === NO_PASSWORD) {
-      return res.status(401).json({ error: 'This account signs in with Google, Microsoft or an emailed code — it has no password.' });
+      return res.status(401).json({ error: 'This account signs in with Google, Microsoft or an emailed code — it has no password. Use "Forgot password" to set one.' });
     }
     if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
       recordFail(key);
@@ -88,7 +103,7 @@ export function registerAuthRoutes(app) {
     }
     clearFails(key);
     startSession(res, user.id);
-    res.json({ id: user.id, name: user.name, email: user.email });
+    res.json(publicUser(user));
   });
 
   app.post('/api/auth/logout', (req, res) => {
@@ -104,14 +119,49 @@ export function registerAuthRoutes(app) {
       password: true,
       google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
       microsoft: !!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET),
-      otp: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) || !!process.env.OTP_DEV_LOG,
+      otp: mailEnabled() || !!process.env.OTP_DEV_LOG,
+      password_reset: mailEnabled() || !!process.env.OTP_DEV_LOG,
     });
   });
 
   app.get('/api/auth/me', (req, res) => {
     const user = currentUser(req);
     if (!user) return res.status(401).json({ error: 'Not logged in' });
-    res.json({ id: user.id, name: user.name, email: user.email });
+    res.json(publicUser(user));
+  });
+
+  // ---- Forgot / reset password (also lets SSO users set a password) ----
+  app.post('/api/auth/forgot', async (req, res) => {
+    const key = String(req.body?.email || '').toLowerCase().trim();
+    if (!validEmail(key)) return res.status(400).json({ error: 'Please enter a valid email address' });
+    if (!mailEnabled() && !process.env.OTP_DEV_LOG) return res.status(503).json({ error: 'Password reset emails are not configured on this server. Ask your administrator.' });
+    const user = db.prepare(`SELECT * FROM users WHERE email = ?`).get(key);
+    // Always answer OK so the endpoint doesn't reveal which emails exist.
+    if (user) {
+      const raw = nanoid(40);
+      const hash = crypto.createHash('sha256').update(raw).digest('hex');
+      db.prepare(`DELETE FROM password_resets WHERE user_id = ?`).run(user.id);
+      db.prepare(`INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, datetime('now', '+1 hour'))`).run(hash, user.id);
+      const link = `${appUrl()}/reset/${raw}`;
+      if (mailEnabled()) await sendPasswordReset({ to: user.email, name: user.name, link });
+      else console.log(`[OTP_DEV_LOG] password reset link for ${user.email}: ${link}`);
+    }
+    res.json({ ok: true });
+  });
+
+  app.post('/api/auth/reset', (req, res) => {
+    const { token, password } = req.body || {};
+    if (!token || !password) return res.status(400).json({ error: 'Token and new password are required' });
+    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    const hash = crypto.createHash('sha256').update(String(token)).digest('hex');
+    const row = db.prepare(`SELECT * FROM password_resets WHERE token_hash = ? AND used = 0 AND expires_at > datetime('now')`).get(hash);
+    if (!row) return res.status(400).json({ error: 'This reset link is invalid or has expired. Request a new one.' });
+    db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(bcrypt.hashSync(password, 10), row.user_id);
+    db.prepare(`UPDATE password_resets SET used = 1 WHERE token_hash = ?`).run(hash);
+    db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(row.user_id); // log out everywhere
+    startSession(res, row.user_id);
+    const user = db.prepare(`SELECT * FROM users WHERE id = ?`).get(row.user_id);
+    res.json(publicUser(user));
   });
 }
 
@@ -119,18 +169,30 @@ export function startSession(res, userId) {
   const token = nanoid(40);
   const expires = new Date(Date.now() + SESSION_DAYS * 864e5);
   db.prepare(`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`)
-    .run(token, userId, expires.toISOString());
-  // Clean up expired sessions opportunistically.
+    .run(token, userId, expires.toISOString().replace('T', ' ').slice(0, 19));
   db.prepare(`DELETE FROM sessions WHERE expires_at < datetime('now')`).run();
   res.cookie(COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: !!process.env.COOKIE_SECURE, // set COOKIE_SECURE=1 once the app runs on https
+    secure: !!process.env.COOKIE_SECURE,
     maxAge: SESSION_DAYS * 864e5,
   });
 }
 
 export function currentUser(req) {
+  // 1) API key: Authorization: Bearer sf_live_xxx
+  const auth = req.headers.authorization || '';
+  if (auth.startsWith('Bearer sf_')) {
+    const hash = crypto.createHash('sha256').update(auth.slice(7).trim()).digest('hex');
+    const row = db.prepare(`SELECT u.*, k.id AS api_key_id FROM api_keys k JOIN users u ON u.id = k.user_id WHERE k.key_hash = ?`).get(hash);
+    if (row) {
+      db.prepare(`UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?`).run(row.api_key_id);
+      req.authVia = 'api_key';
+      return row;
+    }
+    return null;
+  }
+  // 2) Session cookie
   const token = req.cookies?.[COOKIE];
   if (!token) return null;
   return db.prepare(
@@ -139,7 +201,7 @@ export function currentUser(req) {
   ).get(token) || null;
 }
 
-/** Middleware: require a logged-in user; attaches req.user. */
+/** Middleware: require a logged-in user (session or API key); attaches req.user. */
 export function requireAuth(req, res, next) {
   const user = currentUser(req);
   if (!user) return res.status(401).json({ error: 'Please log in' });

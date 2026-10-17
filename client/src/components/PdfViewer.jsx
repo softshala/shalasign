@@ -1,74 +1,118 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /**
- * Renders every page of a PDF at a fixed display width and lets the parent
- * draw an absolutely-positioned overlay on each page (fields, signatures).
+ * Renders every page of a PDF, sized to the container (max `maxWidth`), and lets
+ * the parent draw an absolutely-positioned overlay on each page.
  *
  * props:
- *   url            – PDF url
- *   pageWidth      – display width in CSS px (default 760)
- *   renderOverlay  – (pageIndex, {width, height}) => JSX
- *   onPageClick    – (pageIndex, {x, y}) normalized top-left coords
+ *   url, headers      – where to fetch the PDF
+ *   maxWidth          – CSS px cap for page width (default 820)
+ *   renderOverlay     – (pageIndex, {width, height}) => JSX
+ *   onPageClick       – (pageIndex, {x, y}) normalized top-left coords (ignored if a drag just happened)
+ *   onReady           – (numPages) called once metadata is known
+ *   pageRefs          – optional ref object; pageRefs.current[index] = DOM element (for scrolling)
  */
-export default function PdfViewer({ url, pageWidth = 760, renderOverlay, onPageClick, headers }) {
-  const [pages, setPages] = useState([]); // [{index, width, height}]
+export default function PdfViewer({ url, headers, maxWidth = 820, renderOverlay, onPageClick, onReady, pageRefs }) {
+  const [doc, setDoc] = useState(null);
+  const [pages, setPages] = useState([]); // [{index, baseW, baseH}]
+  const [width, setWidth] = useState(maxWidth);
+  const [error, setError] = useState('');
+  const wrapRef = useRef(null);
   const canvasRefs = useRef({});
+  const renderTasks = useRef({});
 
+  // Measure container width (responsive).
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => setWidth(Math.max(280, Math.min(maxWidth, el.clientWidth)));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [maxWidth]);
+
+  // Load document + page metadata.
   useEffect(() => {
     let cancelled = false;
+    setDoc(null); setPages([]); setError('');
     (async () => {
-      const doc = await pdfjs.getDocument({ url, httpHeaders: headers || {} }).promise;
-      const metas = [];
-      for (let i = 1; i <= doc.numPages; i++) {
-        const page = await doc.getPage(i);
-        const base = page.getViewport({ scale: 1 });
-        const scale = pageWidth / base.width;
-        const vp = page.getViewport({ scale });
-        metas.push({ index: i - 1, width: vp.width, height: vp.height });
+      try {
+        const d = await pdfjs.getDocument({ url, httpHeaders: headers || {}, withCredentials: true }).promise;
         if (cancelled) return;
-        setPages([...metas]);
-        // wait a tick for the canvas to mount, then render
-        await new Promise((r) => setTimeout(r, 0));
-        const canvas = canvasRefs.current[i - 1];
+        const metas = [];
+        for (let i = 1; i <= d.numPages; i++) {
+          const page = await d.getPage(i);
+          const vp = page.getViewport({ scale: 1 });
+          metas.push({ index: i - 1, baseW: vp.width, baseH: vp.height });
+        }
+        if (cancelled) return;
+        setDoc(d); setPages(metas); onReady?.(d.numPages);
+      } catch (e) {
+        console.error('PDF load failed', e);
+        if (!cancelled) setError(e?.message?.includes('401') ? 'Access denied' : 'Could not load the document. Try refreshing the page.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [url, JSON.stringify(headers || {})]);
+
+  // Render pages whenever the doc or width changes.
+  useEffect(() => {
+    if (!doc) return;
+    let cancelled = false;
+    (async () => {
+      for (const p of pages) {
+        if (cancelled) return;
+        const canvas = canvasRefs.current[p.index];
         if (!canvas) continue;
-        const dpr = window.devicePixelRatio || 1;
-        canvas.width = vp.width * dpr;
-        canvas.height = vp.height * dpr;
+        const page = await doc.getPage(p.index + 1);
+        const scale = width / p.baseW;
+        const vp = page.getViewport({ scale });
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.floor(vp.width * dpr);
+        canvas.height = Math.floor(vp.height * dpr);
         canvas.style.width = `${vp.width}px`;
         canvas.style.height = `${vp.height}px`;
         const ctx = canvas.getContext('2d');
-        ctx.scale(dpr, dpr);
-        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        renderTasks.current[p.index]?.cancel?.();
+        const task = page.render({ canvasContext: ctx, viewport: vp });
+        renderTasks.current[p.index] = task;
+        try { await task.promise; } catch (e) { if (e?.name !== 'RenderingCancelledException') console.error(e); }
       }
-    })().catch((e) => console.error('PDF render failed', e));
+    })();
     return () => { cancelled = true; };
-  }, [url, pageWidth, JSON.stringify(headers || {})]);
+  }, [doc, pages, width]);
 
   return (
-    <div>
-      {pages.map((p) => (
-        <div
-          key={p.index}
-          className="pdf-stage"
-          style={{ width: p.width, height: p.height }}
-          onClick={(e) => {
-            if (!onPageClick) return;
-            const rect = e.currentTarget.getBoundingClientRect();
-            onPageClick(p.index, {
-              x: (e.clientX - rect.left) / p.width,
-              y: (e.clientY - rect.top) / p.height,
-            });
-          }}
-        >
-          <canvas ref={(el) => (canvasRefs.current[p.index] = el)} />
-          {renderOverlay && renderOverlay(p.index, { width: p.width, height: p.height })}
-        </div>
-      ))}
-      {pages.length === 0 && <p className="muted">Loading document…</p>}
+    <div ref={wrapRef} style={{ width: '100%' }}>
+      {error && <p className="error">{error}</p>}
+      {pages.map((p) => {
+        const h = (p.baseH / p.baseW) * width;
+        return (
+          <div
+            key={p.index}
+            ref={(el) => { if (pageRefs) pageRefs.current[p.index] = el; }}
+            className="pdf-stage"
+            style={{ width, height: h }}
+            onClick={(e) => {
+              if (!onPageClick) return;
+              if (e.target.closest?.('.field-box')) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              onPageClick(p.index, { x: (e.clientX - rect.left) / width, y: (e.clientY - rect.top) / h });
+            }}
+          >
+            <canvas ref={(el) => (canvasRefs.current[p.index] = el)} />
+            <span className="page-num">{p.index + 1} / {pages.length}</span>
+            {renderOverlay && renderOverlay(p.index, { width, height: h })}
+          </div>
+        );
+      })}
+      {!error && pages.length === 0 && <p className="muted" style={{ textAlign: 'center' }}>Loading document…</p>}
     </div>
   );
 }
