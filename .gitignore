@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output (Render rebuilds this on deploy)
+client/dist/
+
+# Secrets — never commit these
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/.env.example
+
+# Local data (accounts, PDFs, encryption key) — lives outside the app folder
+# normally, but ignore the fallback locations too
+server/data/
+server/data-disk/
+*.db
+*.db-shm
+*.db-wal
+secret.key
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
