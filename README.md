@@ -137,16 +137,33 @@ tells them so if they try it.
 Every completed document can be copied automatically to Microsoft 365, so the
 signed PDFs live in a place your team already backs up and searches. The copy is
 the **sender's sealed PDF** (stamped signatures + Certificate of Completion +
-audit trail), saved as:
+audit trail).
+
+**Default layout — one archive account, private folder per sender.** Point
+`ONEDRIVE_USER` at a single account (e.g. `archive@softshala.com`). Each
+sender's documents go into their own sub-folder, and SignFlow shares that folder
+with the sender (read-only, sign-in required) the first time something lands in
+it. The archive account's owner sees everything; each sender sees only their own:
 
 ```
-SignFlow/<SignFlow folder name or "Unfiled">/<document title> [<envelope id>] signed.pdf
+SignFlow/
+  shubham@softshala.com/           ← shared with shubham@ only
+    Contracts/NDA - Acme [ufE8jZzTvVgF] signed.pdf
+    Unfiled/Offer letter [uU4fvj_Ebhea] signed.pdf
+  priya@softshala.com/             ← shared with priya@ only
+    ...
 ```
+
+Alternatives: `ONEDRIVE_USER=@sender` archives into each sender's **own**
+OneDrive instead (they must be users in your tenant; no sharing needed);
+`ONEDRIVE_SITE=...sharepoint.com/sites/Contracts` uses a SharePoint library with
+the same per-sender folders; `ONEDRIVE_PER_SENDER=0` gives one flat shared tree.
 
 The envelope page shows an **Open in OneDrive** link once archived, and a
-**Copy to OneDrive** button to retry if an upload failed (failures are also
-recorded in the audit trail as `archive.failed`). The original data on
-SignFlow's own disk is unchanged — OneDrive is an extra copy, not a move.
+**Copy to OneDrive** button to retry if an upload failed. The audit trail
+records `archive.onedrive`, `archive.shared`, and any `archive.failed` /
+`archive.share_failed`. The original data on SignFlow's own disk is unchanged —
+OneDrive is an extra copy, not a move.
 
 **Setup (reuses the Microsoft sign-in app registration):**
 

@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS login_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email);
 
+CREATE TABLE IF NOT EXISTS onedrive_shares (
+  drive_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  email TEXT NOT NULL,
+  shared_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (drive_id, path, email)
+);
+
 CREATE TABLE IF NOT EXISTS folders (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
