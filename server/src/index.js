@@ -13,6 +13,7 @@ import { mailEnabled, appUrl, sendSignRequest, sendCompletionEmail } from './mai
 import { registerAuthRoutes, requireAuth } from './auth.js';
 import { registerSsoRoutes } from './sso.js';
 import { registerOtpRoutes } from './otp.js';
+import { archiveEnvelope, archiveInBackground, oneDriveEnabled, oneDriveTarget } from './onedrive.js';
 import { writeEncrypted, readDecrypted, encStr, encryptionActive } from './crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -119,7 +120,8 @@ app.get('/api/envelopes/:id', requireAuth, (req, res) => {
   const signers = db.prepare(`SELECT id, name, email, order_index, status, token, consent_at, signed_at FROM signers WHERE envelope_id = ? ORDER BY order_index`).all(env.id);
   const fields = db.prepare(`SELECT * FROM fields WHERE envelope_id = ?`).all(env.id);
   const events = db.prepare(`SELECT type, actor, detail, ip, created_at FROM audit_events WHERE envelope_id = ? ORDER BY id`).all(env.id);
-  res.json({ ...env, original_pdf: undefined, final_pdf: undefined, signers, fields, events });
+  res.json({ ...env, original_pdf: undefined, final_pdf: undefined, signer_pdf: undefined, signers, fields, events,
+    archive_enabled: oneDriveEnabled(), archive_target: oneDriveEnabled() ? oneDriveTarget() : null });
 });
 
 // Serve the original PDF (for the sender's field-placement editor)
@@ -255,6 +257,21 @@ app.post('/api/envelopes/:id/void', requireAuth, (req, res) => {
   db.prepare(`UPDATE envelopes SET status = 'voided' WHERE id = ?`).run(env.id);
   audit(env.id, 'envelope.voided', `${req.user.name} <${req.user.email}>`, req.body?.reason || '', clientIp(req));
   res.json({ status: 'voided' });
+});
+
+// Copy (or re-copy) the sealed PDF to OneDrive/SharePoint on demand.
+app.post('/api/envelopes/:id/archive', requireAuth, async (req, res) => {
+  const env = ownEnvelope(req);
+  if (!env) return res.status(404).json({ error: 'Not found' });
+  if (!oneDriveEnabled()) return res.status(503).json({ error: 'OneDrive archiving is not configured on this server' });
+  if (env.status !== 'completed') return res.status(409).json({ error: 'Only completed envelopes can be archived' });
+  try {
+    const r = await archiveEnvelope(env.id);
+    res.json({ ok: true, url: r.url, path: r.path });
+  } catch (err) {
+    audit(env.id, 'archive.failed', `${req.user.name} <${req.user.email}>`, `OneDrive archive failed: ${err.message.slice(0, 220)}`, clientIp(req));
+    res.status(502).json({ error: `OneDrive upload failed: ${err.message}` });
+  }
 });
 
 app.get('/api/envelopes/:id/download', requireAuth, (req, res) => {
@@ -433,6 +450,7 @@ app.post('/api/sign/:token', async (req, res) => {
 
     db.prepare(`UPDATE envelopes SET status='completed', final_pdf=?, signer_pdf=?, sha256_final=? WHERE id=?`).run(finalPath, signerPath, finalHash, env.id);
     audit(env.id, 'document.sealed', 'system', `Final document sha256 ${finalHash}`);
+    archiveInBackground(env.id); // copy to OneDrive/SharePoint if configured (does not block the signer)
 
     // Email the signers' copy (no audit trail) to every signer. The email
     // attachment is the decrypted PDF content (not the on-disk ciphertext).

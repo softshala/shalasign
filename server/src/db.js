@@ -148,6 +148,8 @@ try { db.exec(`ALTER TABLE envelopes ADD COLUMN user_id TEXT REFERENCES users(id
 try { db.exec(`ALTER TABLE envelopes ADD COLUMN signer_pdf TEXT`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE envelopes ADD COLUMN folder_id TEXT`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE envelopes ADD COLUMN access_code TEXT`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE envelopes ADD COLUMN archive_url TEXT`); } catch { /* exists */ }   // OneDrive link of the sealed PDF
+try { db.exec(`ALTER TABLE envelopes ADD COLUMN archived_at TEXT`); } catch { /* exists */ }
 
 export default db;
 

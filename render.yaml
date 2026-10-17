@@ -26,3 +26,5 @@ services:
       # GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
       # MS_CLIENT_ID, MS_CLIENT_SECRET, MS_TENANT
       # SSO_ALLOWED_DOMAINS   (e.g. softshala.com — restricts who can create accounts via SSO/code)
+      # Optional OneDrive/SharePoint archive of completed documents (see server/.env.example):
+      # ONEDRIVE_USER  or  ONEDRIVE_SITE,  and optionally ONEDRIVE_FOLDER

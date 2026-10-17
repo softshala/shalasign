@@ -132,6 +132,42 @@ through these methods.
 Accounts created via Google/Microsoft/code have no password; the password form
 tells them so if they try it.
 
+## OneDrive / SharePoint archive
+
+Every completed document can be copied automatically to Microsoft 365, so the
+signed PDFs live in a place your team already backs up and searches. The copy is
+the **sender's sealed PDF** (stamped signatures + Certificate of Completion +
+audit trail), saved as:
+
+```
+SignFlow/<SignFlow folder name or "Unfiled">/<document title> [<envelope id>] signed.pdf
+```
+
+The envelope page shows an **Open in OneDrive** link once archived, and a
+**Copy to OneDrive** button to retry if an upload failed (failures are also
+recorded in the audit trail as `archive.failed`). The original data on
+SignFlow's own disk is unchanged — OneDrive is an extra copy, not a move.
+
+**Setup (reuses the Microsoft sign-in app registration):**
+
+1. In entra.microsoft.com → *App registrations → SignFlow → API permissions →
+   Add a permission → Microsoft Graph → **Application permissions*** add
+   `Files.ReadWrite.All` (to archive into a user's OneDrive) **or**
+   `Sites.ReadWrite.All` (to archive into a SharePoint site). Click
+   **Grant admin consent**.
+2. Set the destination env var: `ONEDRIVE_USER=archive@softshala.com` *or*
+   `ONEDRIVE_SITE=softshala.sharepoint.com/sites/Contracts`. Optionally
+   `ONEDRIVE_FOLDER` (default `SignFlow`). `MS_TENANT`, `MS_CLIENT_ID` and
+   `MS_CLIENT_SECRET` must already be set.
+
+Note on scope: these are *application* permissions, which let the server write
+to **every** OneDrive (`Files.ReadWrite.All`) or **every** site
+(`Sites.ReadWrite.All`) in the tenant, not just the one you point it at. That
+is how Microsoft Graph app-only access works. Keep the client secret in Render's
+Environment tab only. If your IT policy requires least privilege, use
+`Sites.Selected` and grant the app access to one site via PowerShell; the code
+needs no change for that.
+
 ## How the product works (the "reverse-engineered" model)
 
 Every e-sign platform is built around the same five concepts:
@@ -168,6 +204,7 @@ Every e-sign platform is built around the same five concepts:
 | GET | `/api/envelopes` / `/:id` | List / detail incl. signers, fields, audit log |
 | GET | `/api/envelopes/:id/pdf` | Original PDF (for the field editor) |
 | GET | `/api/envelopes/:id/download` | Final sealed PDF |
+| POST | `/api/envelopes/:id/archive` | Copy sealed PDF to OneDrive/SharePoint (retry) |
 | POST | `/api/envelopes/:id/void` | Void an in-flight envelope |
 | GET | `/api/sign/:token` | Signer's view (fields, turn status; logs "viewed") |
 | GET | `/api/sign/:token/pdf` | PDF for the signing ceremony |
@@ -182,6 +219,7 @@ server/
   src/auth.js    – accounts, sessions, password login
   src/sso.js     – Google / Microsoft sign-in (OpenID Connect + PKCE)
   src/otp.js     – emailed one-time code login
+  src/onedrive.js – Microsoft Graph upload of sealed PDFs to OneDrive/SharePoint
   src/pdf.js     – pdf-lib stamping + Certificate of Completion + SHA-256
 client/
   src/pages/Dashboard.jsx       – envelope list + upload
