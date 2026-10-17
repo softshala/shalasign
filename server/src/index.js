@@ -53,6 +53,28 @@ const upload = multer({
     file.mimetype === 'application/pdf' ? cb(null, true) : cb(new Error('Only PDF files are accepted')),
 });
 
+// Health / deployment check. Deliberately contains no secrets: it tells you whether
+// data will survive a redeploy, which is the #1 hosting mistake.
+function storageIsMount() {
+  try { return fs.statSync(STORAGE_DIR).dev !== fs.statSync(path.dirname(STORAGE_DIR)).dev; } catch { return false; }
+}
+app.get('/api/health', (_req, res) => {
+  const hosted = !!(process.env.RENDER || process.env.STORAGE_DIR);
+  const persistent = !hosted || storageIsMount();
+  res.json({
+    ok: true,
+    uptime_seconds: Math.round(process.uptime()),
+    hosted_on_render: !!process.env.RENDER,
+    storage_dir_from_env: !!process.env.STORAGE_DIR,
+    storage_is_persistent_disk: persistent,
+    encryption_key_source: process.env.SIGNFLOW_SECRET ? 'env' : 'file-in-storage-dir',
+    warnings: [
+      ...(!persistent ? ['Storage is NOT a persistent disk: accounts, documents and sessions are erased on every deploy/restart. Attach a disk and set STORAGE_DIR to its mount path.'] : []),
+      ...(process.env.RENDER && !process.env.SIGNFLOW_SECRET ? ['SIGNFLOW_SECRET is not set: the encryption key lives on the data disk, so disk backups can be decrypted by whoever holds them.'] : []),
+    ],
+  });
+});
+
 const clientIp = (req) => (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().split(',')[0].trim();
 
 // ---------- Envelopes ----------
@@ -476,4 +498,14 @@ if (fs.existsSync(clientDist)) {
 }
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`SignFlow server on http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`SignFlow server on http://localhost:${PORT}`);
+  if ((process.env.RENDER || process.env.STORAGE_DIR) && !storageIsMount()) {
+    console.warn('\n!!! WARNING: STORAGE_DIR is not on a persistent disk. All accounts, documents and sessions');
+    console.warn(`!!! will be ERASED on the next deploy or restart. Storage dir: ${STORAGE_DIR}`);
+    console.warn('!!! Fix: attach a disk to the service and set STORAGE_DIR to its mount path (see render.yaml).\n');
+  }
+  if (process.env.RENDER && !process.env.SIGNFLOW_SECRET) {
+    console.warn('!!! WARNING: SIGNFLOW_SECRET is not set; the encryption key is stored next to the data.');
+  }
+});

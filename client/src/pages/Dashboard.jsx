@@ -30,6 +30,7 @@ export default function Dashboard() {
     fd.append('pdf', file);
     fd.append('title', file.name.replace(/\.pdf$/i, ''));
     const res = await fetch('/api/envelopes', { method: 'POST', body: fd });
+    if (res.status === 401) return nav('/login?error=' + encodeURIComponent('Your session has ended. Please log in again.'));
     const data = await res.json();
     if (!res.ok) return setError(data.error || 'Upload failed');
     nav(`/prepare/${data.id}`);

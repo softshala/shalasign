@@ -81,6 +81,7 @@ export default function Prepare() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ recipients: parsedRecipients, fields, folder_id: folderId || null, access_code: accessCode || null, attachments: bulkAttachments }),
       });
+      if (res.status === 401) return nav('/login?error=' + encodeURIComponent('Your session has ended. Please log in again.'));
       const data = await res.json();
       if (!res.ok) return setError(data.error || 'Bulk send failed');
       return setLinks({ emailed: data.emailed, list: data.links, bulk: true, count: data.count });
@@ -93,6 +94,7 @@ export default function Prepare() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ signers: clean, fields, sequential, folder_id: folderId || null, access_code: accessCode || null }),
     });
+    if (res.status === 401) return nav('/login?error=' + encodeURIComponent('Your session has ended. Please log in again.'));
     const data = await res.json();
     if (!res.ok) return setError(data.error || 'Send failed');
     setLinks({ emailed: data.emailed, list: data.links });

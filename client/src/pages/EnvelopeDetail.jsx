@@ -12,6 +12,7 @@ export default function EnvelopeDetail() {
     setArchiving(true); setArchiveError('');
     try {
       const r = await fetch(`/api/envelopes/${id}/archive`, { method: 'POST' });
+      if (r.status === 401) return nav('/login?error=' + encodeURIComponent('Your session has ended. Please log in again.'));
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'Archive failed');
       await load();
@@ -57,7 +58,8 @@ export default function EnvelopeDetail() {
             {env.status === 'sent' && (
               <button className="secondary" onClick={async () => {
                 if (confirm('Void this envelope? Signers will no longer be able to sign.')) {
-                  await fetch(`/api/envelopes/${id}/void`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Voided by sender' }) });
+                  const r = await fetch(`/api/envelopes/${id}/void`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Voided by sender' }) });
+                  if (r.status === 401) return nav('/login?error=' + encodeURIComponent('Your session has ended. Please log in again.'));
                   load();
                 }
               }}>Void</button>
