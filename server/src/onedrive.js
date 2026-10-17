@@ -1,9 +1,15 @@
 // OneDrive / SharePoint archive via Microsoft Graph.
 //
 // When an envelope completes, the sealed PDF (sender's copy, with certificate
-// and audit trail) is copied into a OneDrive or SharePoint document library:
+// and audit trail) is copied into a OneDrive or SharePoint document library.
+// Default layout (ONEDRIVE_PATH = "{sender_name}/{date}_{time}_{signer}"):
 //
-//   {ONEDRIVE_FOLDER}/{SignFlow folder name or "Unfiled"}/{title} [{envelope id}] signed.pdf
+//   SignFlow/Shubham Sharma/2026-10-17_14-32-05_Asha Verma.pdf
+//
+// ONEDRIVE_PATH tokens: {sender_name} {sender_email} {folder} {title} {id}
+//   {date} {time} (completion time in ONEDRIVE_TIMEZONE, default Asia/Kolkata)
+//   {signer} (first signer's full name) {signer_first} {signer_last} {signers} (all, comma-joined)
+// Slashes in the pattern create sub-folders; ".pdf" is appended automatically.
 //
 // Authentication is app-only (client-credentials) using the same Entra app
 // registration as Microsoft sign-in (MS_TENANT / MS_CLIENT_ID / MS_CLIENT_SECRET),
@@ -20,8 +26,9 @@
 //                                                            sub-folders, shared the same way)
 // Optional:
 //   ONEDRIVE_FOLDER=SignFlow                              root folder (default "SignFlow")
-//   ONEDRIVE_PER_SENDER=0                                 one shared tree instead of per-sender folders
-//   ONEDRIVE_SHARE_WITH_SENDER=0                          don't share each sender's folder with them
+//   ONEDRIVE_PATH={sender_name}/{date}_{time}_{signer}    file/folder naming pattern (see tokens above)
+//   ONEDRIVE_TIMEZONE=Asia/Kolkata                        timezone for {date}/{time}
+//   ONEDRIVE_SHARE_WITH_SENDER=0                          don't share each sender's top folder with them
 //
 // Required Graph APPLICATION permission on the app registration (+ admin consent):
 //   Files.ReadWrite.All  (for ONEDRIVE_USER)   or   Sites.ReadWrite.All  (for ONEDRIVE_SITE)
@@ -35,10 +42,14 @@ const cfg = {
   user: process.env.ONEDRIVE_USER,
   site: process.env.ONEDRIVE_SITE,
   folder: (process.env.ONEDRIVE_FOLDER || 'SignFlow').replace(/^\/+|\/+$/g, '') || 'SignFlow',
-  perSender: process.env.ONEDRIVE_PER_SENDER !== '0',
   shareWithSender: process.env.ONEDRIVE_SHARE_WITH_SENDER !== '0',
+  tz: process.env.ONEDRIVE_TIMEZONE || 'Asia/Kolkata',
+  pathPattern: null, // set below
 };
 const SENDER_DRIVE = cfg.user === '@sender'; // archive into each sender's own OneDrive
+// In a sender's own drive the sender folder would be redundant, so default to a flat layout there.
+cfg.pathPattern = (process.env.ONEDRIVE_PATH || (SENDER_DRIVE ? '{date}_{time}_{signer}' : '{sender_name}/{date}_{time}_{signer}'))
+  .replace(/\.pdf$/i, '').replace(/^\/+|\/+$/g, '');
 // Overridable for tests only.
 const GRAPH = (process.env.GRAPH_BASE_URL || 'https://graph.microsoft.com/v1.0').replace(/\/$/, '');
 const LOGIN = (process.env.MS_LOGIN_BASE_URL || 'https://login.microsoftonline.com').replace(/\/$/, '');
@@ -167,6 +178,32 @@ async function shareFolderWithSender(driveId, folderPath, email) {
   return true;
 }
 
+// "YYYY-MM-DD HH:MM:SS" (UTC, as stored) -> { date: 'YYYY-MM-DD', time: 'HH-MM-SS' } in cfg.tz.
+function stampParts(utcStr) {
+  const d = utcStr ? new Date(utcStr.replace(' ', 'T') + 'Z') : new Date();
+  let fmt;
+  try {
+    fmt = new Intl.DateTimeFormat('en-GB', { timeZone: cfg.tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch {
+    fmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+  const p = Object.fromEntries(fmt.formatToParts(d).map((x) => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}-${p.minute}-${p.second}` };
+}
+
+const splitName = (full) => {
+  const parts = String(full || '').trim().split(/\s+/).filter(Boolean);
+  return { first: parts[0] || '', last: parts.length > 1 ? parts.slice(1).join(' ') : '' };
+};
+
+// Fill {tokens} in the ONEDRIVE_PATH pattern. Each path segment is sanitized separately.
+function renderPath(pattern, tokens) {
+  return pattern
+    .split('/')
+    .map((seg) => safeName(seg.replace(/\{(\w+)\}/g, (_, k) => (tokens[k] ?? '')).replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '')))
+    .filter(Boolean);
+}
+
 // OneDrive forbids " * : < > ? / \ | and trailing dots/spaces in names.
 const safeName = (s) => String(s || '').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, 120) || 'Document';
 
@@ -189,10 +226,26 @@ export async function archiveEnvelope(envelopeId) {
   if (SENDER_DRIVE && !owner) throw new Error('Envelope has no owner to archive for');
 
   const bytes = readDecrypted(env.final_pdf);
-  // Central drive: SignFlow/<sender email>/<folder>/file  — each sender gets their own tree.
-  // Sender's own drive: SignFlow/<folder>/file.
-  const senderFolder = cfg.perSender && !SENDER_DRIVE && owner ? `${cfg.folder}/${safeName(owner)}` : null;
-  const relPath = `${senderFolder || cfg.folder}/${safeName(env.folder_name || 'Unfiled')}/${safeName(env.title)} [${env.id}] signed.pdf`;
+  const signers = db.prepare(`SELECT name FROM signers WHERE envelope_id = ? ORDER BY order_index`).all(envelopeId).map((r) => r.name);
+  const first = splitName(signers[0]);
+  const { date, time } = stampParts(env.completed_at);
+  const tokens = {
+    sender_name: env.owner_name || owner || 'Unknown sender',
+    sender_email: owner,
+    folder: env.folder_name || 'Unfiled',
+    title: env.title,
+    id: env.id,
+    date, time,
+    signer: signers[0] || 'Unknown signer',
+    signer_first: first.first,
+    signer_last: first.last,
+    signers: signers.join(', '),
+  };
+  const segments = renderPath(cfg.pathPattern, tokens);
+  if (!segments.length) segments.push(`${date}_${time}_${safeName(env.id)}`);
+  const relPath = `${cfg.folder}/${segments.join('/')}.pdf`;
+  // The sender's top-level folder (shared with them). Only when the pattern has a folder level.
+  const senderFolder = !SENDER_DRIVE && owner && segments.length > 1 ? `${cfg.folder}/${segments[0]}` : null;
 
   const driveId = await resolveDriveId(owner);
   let item;

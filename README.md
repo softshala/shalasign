@@ -139,25 +139,33 @@ signed PDFs live in a place your team already backs up and searches. The copy is
 the **sender's sealed PDF** (stamped signatures + Certificate of Completion +
 audit trail).
 
-**Default layout — one archive account, private folder per sender.** Point
-`ONEDRIVE_USER` at a single account (e.g. `archive@softshala.com`). Each
-sender's documents go into their own sub-folder, and SignFlow shares that folder
-with the sender (read-only, sign-in required) the first time something lands in
-it. The archive account's owner sees everything; each sender sees only their own:
+**Default layout — one archive account, a private folder per sender.** Point
+`ONEDRIVE_USER` at a single account (e.g. `shubham@softshala.com`). Each
+sender gets a folder named after them, and every file is named by completion
+date, time and the signer's name. SignFlow shares each sender's folder with that
+sender (read-only, sign-in required) the first time something lands in it, so
+the account owner sees everything and each sender sees only their own:
 
 ```
 SignFlow/
-  shubham@softshala.com/           ← shared with shubham@ only
-    Contracts/NDA - Acme [ufE8jZzTvVgF] signed.pdf
-    Unfiled/Offer letter [uU4fvj_Ebhea] signed.pdf
-  priya@softshala.com/             ← shared with priya@ only
+  Shubham Sharma/                  ← shared with shubham@softshala.com only
+    2026-10-17_14-32-05_Asha Verma.pdf
+    2026-10-18_09-05-41_Rohit Jain.pdf
+  Priya Mehta/                     ← shared with priya@softshala.com only
     ...
 ```
 
+Times are in `ONEDRIVE_TIMEZONE` (default `Asia/Kolkata`). The naming is a
+template, `ONEDRIVE_PATH`, defaulting to `{sender_name}/{date}_{time}_{signer}`;
+tokens are `{sender_name} {sender_email} {folder} {title} {id} {date} {time}
+{signer} {signer_first} {signer_last} {signers}`, slashes create sub-folders and
+`.pdf` is appended. For example `{sender_name}/{folder}/{date}_{title}` groups
+by SignFlow folder and keeps the document title.
+
 Alternatives: `ONEDRIVE_USER=@sender` archives into each sender's **own**
-OneDrive instead (they must be users in your tenant; no sharing needed);
-`ONEDRIVE_SITE=...sharepoint.com/sites/Contracts` uses a SharePoint library with
-the same per-sender folders; `ONEDRIVE_PER_SENDER=0` gives one flat shared tree.
+OneDrive instead (they must be users in your tenant; no sharing needed, flat
+layout by default); `ONEDRIVE_SITE=...sharepoint.com/sites/Contracts` uses a
+SharePoint library with the same layout and sharing.
 
 The envelope page shows an **Open in OneDrive** link once archived, and a
 **Copy to OneDrive** button to retry if an upload failed. The audit trail
