@@ -111,6 +111,27 @@ only their own envelopes. Passwords are stored bcrypt-hashed; sessions are
 30-day httpOnly cookies (set `COOKIE_SECURE=1` in `.env` once the app runs
 on https). **Signers never need an account** — their emailed link is their key.
 
+## Sign-in options: Google, Microsoft, emailed code
+
+Besides email + password, senders can sign in three more ways. Each one is
+switched on by environment variables and the login page only shows the methods
+that are configured. Accounts are matched by email address, so a colleague who
+signed up with a password can later use Google or a code with the same email.
+
+| Method | What to configure |
+|---|---|
+| **Emailed one-time code** | Nothing extra — works as soon as SMTP is set up. 6-digit code, valid 10 minutes, 5 attempts. For local development without SMTP set `OTP_DEV_LOG=1` and codes print in the server console. |
+| **Google** | Google Cloud console → *APIs & Services → Credentials → Create credentials → OAuth client ID → Web application*. Authorized redirect URI: `https://YOUR-APP/api/auth/sso/google/callback`. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. If the OAuth consent screen is in *Testing* mode, add your users as test users or publish it. |
+| **Microsoft** | entra.microsoft.com → *App registrations → New registration*. Platform *Web*, redirect URI `https://YOUR-APP/api/auth/sso/microsoft/callback`. Then *Certificates & secrets → New client secret* and copy its **Value**. Set `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, and `MS_TENANT` (your Directory/tenant ID to allow only your organisation, `organizations` for any work account, or `common` for any Microsoft account). |
+
+`APP_URL` must be the exact public address, because the redirect URIs are built
+from it. For a company-internal deployment also set
+`SSO_ALLOWED_DOMAINS=softshala.com` so only your own domain can create accounts
+through these methods.
+
+Accounts created via Google/Microsoft/code have no password; the password form
+tells them so if they try it.
+
 ## How the product works (the "reverse-engineered" model)
 
 Every e-sign platform is built around the same five concepts:
@@ -139,6 +160,9 @@ Every e-sign platform is built around the same five concepts:
 
 | Method | Route | Purpose |
 |---|---|---|
+| GET | `/api/auth/providers` | Which sign-in methods are configured |
+| GET | `/api/auth/sso/:provider` → `/callback` | Google / Microsoft sign-in (`google`, `microsoft`) |
+| POST | `/api/auth/otp/request` / `verify` | Emailed one-time code login |
 | POST | `/api/envelopes` | Upload PDF (multipart `pdf`), create draft |
 | POST | `/api/envelopes/:id/send` | Attach signers + fields, generate signing links |
 | GET | `/api/envelopes` / `/:id` | List / detail incl. signers, fields, audit log |
@@ -154,7 +178,10 @@ Every e-sign platform is built around the same five concepts:
 ```
 server/
   src/index.js   – Express app, all routes, sealing orchestration
-  src/db.js      – SQLite schema (envelopes, signers, fields, audit_events)
+  src/db.js      – SQLite schema (users, sessions, login_codes, envelopes, signers, fields, audit_events)
+  src/auth.js    – accounts, sessions, password login
+  src/sso.js     – Google / Microsoft sign-in (OpenID Connect + PKCE)
+  src/otp.js     – emailed one-time code login
   src/pdf.js     – pdf-lib stamping + Certificate of Completion + SHA-256
 client/
   src/pages/Dashboard.jsx       – envelope list + upload

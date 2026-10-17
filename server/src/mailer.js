@@ -76,6 +76,19 @@ export function sendSignRequest({ signer, envelope, senderNote }) {
   );
 }
 
+// One-time login code (passwordless sign-in).
+export function sendLoginCode({ to, code, minutes }) {
+  return send(
+    to,
+    `${code} is your SignFlow sign-in code`,
+    layout(`
+      <p>Use this code to sign in to SignFlow:</p>
+      <p style="font-size:34px;letter-spacing:10px;font-weight:700;font-family:Menlo,Consolas,monospace;margin:18px 0">${code}</p>
+      <p style="color:#68707c;font-size:13px">It expires in ${minutes} minutes. If you didn't request it, you can ignore this email — nobody can sign in without the code.</p>
+    `)
+  );
+}
+
 export function sendCompletionEmail({ to, name, envelope, pdfContent }) {
   return send(
     to,

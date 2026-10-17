@@ -22,3 +22,7 @@ services:
         generateValue: true     # Render generates a strong encryption key and keeps it secret (not in any file)
       # Set these in the Render dashboard (Environment tab) — do not commit passwords:
       # APP_URL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL
+      # Optional sign-in methods (see server/.env.example for setup steps):
+      # GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+      # MS_CLIENT_ID, MS_CLIENT_SECRET, MS_TENANT
+      # SSO_ALLOWED_DOMAINS   (e.g. softshala.com — restricts who can create accounts via SSO/code)

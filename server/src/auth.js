@@ -5,6 +5,37 @@ import db from './db.js';
 const SESSION_DAYS = 30;
 const COOKIE = 'sf_session';
 
+// Accounts created through Google/Microsoft/OTP have no password. We store this
+// sentinel (bcrypt can never match it) rather than relaxing the NOT NULL column.
+export const NO_PASSWORD = '!';
+
+// Optional allow-list of email domains for accounts created via SSO / OTP,
+// e.g. SSO_ALLOWED_DOMAINS=softshala.com,partner.in  (password signup is unaffected).
+const ALLOWED_DOMAINS = (process.env.SSO_ALLOWED_DOMAINS || '')
+  .split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+
+export function domainAllowed(email) {
+  if (!ALLOWED_DOMAINS.length) return true;
+  const domain = email.split('@')[1] || '';
+  return ALLOWED_DOMAINS.includes(domain);
+}
+
+/** Find a user by email, or create a password-less one (used by SSO and OTP). */
+export function findOrCreateUser(email, name) {
+  const key = email.toLowerCase().trim();
+  const existing = db.prepare(`SELECT * FROM users WHERE email = ?`).get(key);
+  if (existing) return existing;
+  if (!domainAllowed(key)) {
+    const err = new Error('Accounts for this email domain are not allowed. Ask your administrator.');
+    err.status = 403;
+    throw err;
+  }
+  const id = nanoid(10);
+  const displayName = (name || key.split('@')[0]).trim().slice(0, 80);
+  db.prepare(`INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)`).run(id, displayName, key, NO_PASSWORD);
+  return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id);
+}
+
 // Simple in-memory brute-force protection: after too many failed logins for an
 // email, lock that email for a cooldown window.
 const MAX_FAILS = 5;
@@ -48,6 +79,9 @@ export function registerAuthRoutes(app) {
       return res.status(429).json({ error: `Too many attempts. Try again in ${mins} minute(s).` });
     }
     const user = db.prepare(`SELECT * FROM users WHERE email = ?`).get(key);
+    if (user && user.password_hash === NO_PASSWORD) {
+      return res.status(401).json({ error: 'This account signs in with Google, Microsoft or an emailed code — it has no password.' });
+    }
     if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
       recordFail(key);
       return res.status(401).json({ error: 'Wrong email or password' });
@@ -64,6 +98,16 @@ export function registerAuthRoutes(app) {
     res.json({ ok: true });
   });
 
+  // Tells the login page which sign-in methods are configured on this server.
+  app.get('/api/auth/providers', (_req, res) => {
+    res.json({
+      password: true,
+      google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+      microsoft: !!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET),
+      otp: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) || !!process.env.OTP_DEV_LOG,
+    });
+  });
+
   app.get('/api/auth/me', (req, res) => {
     const user = currentUser(req);
     if (!user) return res.status(401).json({ error: 'Not logged in' });
@@ -71,7 +115,7 @@ export function registerAuthRoutes(app) {
   });
 }
 
-function startSession(res, userId) {
+export function startSession(res, userId) {
   const token = nanoid(40);
   const expires = new Date(Date.now() + SESSION_DAYS * 864e5);
   db.prepare(`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`)

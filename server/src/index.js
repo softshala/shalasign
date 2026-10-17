@@ -11,6 +11,8 @@ import db, { audit, STORAGE_DIR, tx } from './db.js';
 import { sealEnvelope, sha256 } from './pdf.js';
 import { mailEnabled, appUrl, sendSignRequest, sendCompletionEmail } from './mailer.js';
 import { registerAuthRoutes, requireAuth } from './auth.js';
+import { registerSsoRoutes } from './sso.js';
+import { registerOtpRoutes } from './otp.js';
 import { writeEncrypted, readDecrypted, encStr, encryptionActive } from './crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,6 +39,8 @@ app.use(cookieParser());
 app.use(express.json({ limit: '30mb' })); // room for signature + attachment uploads
 
 registerAuthRoutes(app);
+registerSsoRoutes(app);   // Google / Microsoft sign-in (when configured)
+registerOtpRoutes(app);   // emailed one-time code login (when SMTP configured)
 
 const upload = multer({
   storage: multer.diskStorage({
