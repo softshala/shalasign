@@ -52,6 +52,7 @@ app.use((req, res, next) => {
 
 app.use(cookieParser());
 app.use(express.json({ limit: '40mb' })); // signature + up to several 10 MB attachments as base64
+app.use(express.urlencoded({ extended: false, limit: '1mb' })); // OAuth 2.1 clients (claude.ai, MCP clients) send token/revoke requests form-encoded
 
 // ---------- Health / deployment check (no secrets) ----------
 function storageIsMount() {
