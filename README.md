@@ -60,6 +60,8 @@ OneDrive or Google Drive folder they picked. No per-customer server setup.
 **Requires Node.js 22.5 or newer** (the database uses Node's built-in SQLite module). Check with `node --version`. Hosting picks this up from `.node-version`.
 
 ```bash
+git clone https://github.com/softshala/shalasign.git && cd shalasign
+
 # 1. Backend
 cd server
 npm install
