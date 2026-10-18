@@ -73,8 +73,9 @@ email is configured and the encryption key comes from the environment.
 
 ## Configuration
 
-Copy `server/.env.example` to `server/.env`. Everything is optional; the login
-page and the app only show what is configured.
+**Most installations need no `.env` at all** — the operator configures email,
+sign-in providers and access in the browser (see *Operator setup*). Environment
+variables are a fallback for container deployments and for hosting concerns:
 
 | Area | Variables |
 |---|---|
@@ -203,66 +204,32 @@ Roles: owner (one), admin, member. Folders and templates are shared across the
 workspace. Members who leave keep their documents in the workspace and get a
 fresh personal workspace.
 
-## Operator setup (once, for the whole platform)
+## Operator setup — in the browser, not on the server
 
-This is the only server-side configuration, and it is the operator's, not the
-customers'. It is what Zoho and Adobe do behind the scenes.
+The first account created on a fresh install becomes the **platform
+operator** and is taken through a first-run wizard (`/setup`); everything is
+also available later under **Admin**. Nothing requires editing the server:
 
-1. **Microsoft app** — entra.microsoft.com → App registrations → New
-   registration. Supported account types: **Accounts in any organizational
-   directory and personal Microsoft accounts** (multi-tenant). Redirect URIs
-   (Web): `https://YOUR-APP/api/auth/sso/microsoft/callback` and
-   `https://YOUR-APP/api/connect/microsoft/callback`. Create a client secret.
-   Set `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT=common`. Delegated
-   permissions are requested dynamically; no admin consent is needed in tenants
-   that allow user consent. Complete Microsoft *publisher verification* to
-   remove the "unverified" warning.
-2. **Google app** — console.cloud.google.com → OAuth consent screen (External,
-   published) → Credentials → OAuth client ID (Web). Redirect URIs:
-   `https://YOUR-APP/api/auth/sso/google/callback` and
-   `https://YOUR-APP/api/connect/google/callback`. Enable the Gmail API and
-   Google Drive API. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
-   **Note:** `gmail.send` is a Google *restricted* scope — public release
-   requires Google's verification and an annual third-party security
-   assessment. `drive.file` only needs brand verification. Until then, Google
-   users' email goes through the platform sender.
-3. **Platform sender** — any transactional SMTP (Brevo, Postmark, SES, or a
-   mailbox): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `FROM_EMAIL`.
-   Used for login codes, password resets, and as the default/fallback for users
-   who have not connected an inbox.
-4. **Hosting** — persistent disk + `STORAGE_DIR`, `SIGNFLOW_SECRET`, `APP_URL`,
-   `COOKIE_SECURE=1`. Check `/api/health`.
+| Admin tab | What you configure |
+|---|---|
+| Setup status | Persistent disk, encryption key, public URL, email, providers — with a Fix button for each gap |
+| Email | The platform sender (presets for Microsoft 365, Gmail, Brevo, Resend, or any SMTP) with a one-click test email |
+| Sign-in & connectors | The platform Microsoft and Google apps: paste client ID + secret, copy the redirect URIs shown, verify Microsoft credentials live |
+| Access & operators | Open sign-up or invitation only, allowed email domains, who else is an operator |
+| Assistant | Default is bring-your-own-key; opt in to a shared platform key if you want to pay for users |
+| General | Platform name, public URL override, reverse-proxy mode, archive time zone |
 
-The older app-only `ONEDRIVE_*` variables still work as an operator-level
-fallback archive when a user has connected nothing.
+The public URL, HTTPS and proxy trust are **detected automatically** from real
+requests. Settings are stored in the database (secrets encrypted) and override
+environment variables, which remain as a fallback for container deployments.
+The only true server-side requirements are the hosting ones: a persistent disk
+and, ideally, `SIGNFLOW_SECRET` in the host's secret store.
 
-## Claude: MCP server and in-app assistant
-
-SignFlow has a built-in **MCP server** at `/mcp` (Streamable HTTP). Claude can
-list and inspect documents, send templates or new PDFs for signature, remind,
-void, correct a signer's email, move documents to folders and read your setup —
-acting as the connected user, with every action in the audit trail.
-
-- **claude.ai / Claude for Work**: Settings → Connectors → Add custom connector
-  → paste `https://YOUR-APP/mcp`. SignFlow's OAuth server (discovery at
-  `/.well-known/oauth-authorization-server`, dynamic registration, PKCE,
-  consent screen, refresh tokens) handles the sign-in. Users see and revoke
-  connected apps in *Settings → Claude & MCP*.
-- **Claude Code**: `claude mcp add --transport http signflow https://YOUR-APP/mcp --header "Authorization: Bearer sf_live_…"`
-- **Claude Desktop**: via `mcp-remote` with the same header (snippet in the app).
-
-The **in-app assistant** (✨ Ask, bottom right) runs Claude with the same tools
-on the server, as the logged-in user. It uses **the user's own Anthropic API
-key** (Settings → Claude & MCP; stored encrypted, verified before saving) or a
-**workspace key** an admin sets for the whole team, so customers pay for their
-own usage. The operator's key is used only with `ASSISTANT_SHARED_KEY=1`.
-Model: `ASSISTANT_MODEL` (default `claude-opus-5-5`). Destructive actions such
-as voiding require an explicit confirmation from the user.
-
-Tools: `list_documents`, `get_document`, `get_stats`, `list_templates`,
-`send_from_template`, `create_document`, `send_document`, `remind_signers`,
-`void_document`, `change_signer_email`, `list_folders`, `move_to_folder`,
-`get_my_setup`.
+Google note: `gmail.send` is a Google *restricted* scope — public release
+requires Google's verification and an annual security assessment; `drive.file`
+only needs brand verification. Until then Google users' mail goes through the
+platform sender. Microsoft needs publisher verification to remove the
+"unverified" warning for other organisations.
 
 ## API
 
@@ -312,6 +279,7 @@ server/src/
   storage.js    – archive to the user's/workspace's OneDrive or Google Drive
   orgs.js       – workspaces, members, invitations, shared sending/storage
   scope.js      – who may see / edit which envelopes
+  platform.js   – operator console: settings store, URL detection, access rules
   tools.js      – the actions Claude can take (shared by MCP + assistant)
   mcp.js        – MCP server (Streamable HTTP) at /mcp
   oauth.js      – OAuth 2.1 server for MCP clients (claude.ai connectors)

@@ -17,34 +17,22 @@
 import crypto from 'crypto';
 import { appUrl } from './mailer.js';
 import { startSession, findOrCreateUser } from './auth.js';
+import { googleConfig, microsoftConfig } from './platform.js';
 
 const OAUTH_COOKIE = 'sf_oauth';
-const tenant = process.env.MS_TENANT || 'common';
+const LOGIN = (process.env.MS_LOGIN_BASE_URL || 'https://login.microsoftonline.com').replace(/\/$/, '');
 
-const PROVIDERS = {
-  google: {
-    label: 'Google',
-    clientId: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-    tokenUrl: 'https://oauth2.googleapis.com/token',
-    userinfoUrl: 'https://openidconnect.googleapis.com/v1/userinfo',
-  },
-  microsoft: {
-    label: 'Microsoft',
-    clientId: process.env.MS_CLIENT_ID,
-    clientSecret: process.env.MS_CLIENT_SECRET,
-    authUrl: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`,
-    tokenUrl: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
-    userinfoUrl: 'https://graph.microsoft.com/oidc/userinfo',
-  },
-};
-
-export const ssoEnabled = (name) => !!(PROVIDERS[name]?.clientId && PROVIDERS[name]?.clientSecret);
+// Built per request so operator changes in the console apply immediately.
+function provider(name) {
+  if (name === 'google') { const c = googleConfig(); return c && { label: 'Google', clientId: c.clientId, clientSecret: c.clientSecret, authUrl: 'https://accounts.google.com/o/oauth2/v2/auth', tokenUrl: process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token', userinfoUrl: process.env.GOOGLE_USERINFO_URL || 'https://openidconnect.googleapis.com/v1/userinfo' }; }
+  if (name === 'microsoft') { const c = microsoftConfig(); return c && { label: 'Microsoft', clientId: c.clientId, clientSecret: c.clientSecret, authUrl: `${LOGIN}/${c.tenant}/oauth2/v2.0/authorize`, tokenUrl: `${LOGIN}/${c.tenant}/oauth2/v2.0/token`, userinfoUrl: (process.env.GRAPH_BASE_URL ? process.env.GRAPH_BASE_URL.replace(/\/v1\.0$/, '') : 'https://graph.microsoft.com') + '/oidc/userinfo' }; }
+  return null;
+}
+export const ssoEnabled = (name) => !!provider(name);
 
 const b64url = (buf) => Buffer.from(buf).toString('base64url');
 const redirectUri = (name) => `${appUrl()}/api/auth/sso/${name}/callback`;
-const cookieOpts = () => ({ httpOnly: true, sameSite: 'lax', secure: !!process.env.COOKIE_SECURE, maxAge: 10 * 60 * 1000, path: '/api/auth/sso' });
+const cookieOpts = (req) => ({ httpOnly: true, sameSite: 'lax', secure: !!process.env.COOKIE_SECURE || !!req?.secure, maxAge: 10 * 60 * 1000, path: '/api/auth/sso' });
 
 function decodeJwtPayload(jwt) {
   try { return JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8')); } catch { return {}; }
@@ -54,14 +42,14 @@ export function registerSsoRoutes(app) {
   // Step 1: send the browser to the provider.
   app.get('/api/auth/sso/:provider', (req, res) => {
     const name = req.params.provider;
-    const p = PROVIDERS[name];
-    if (!p || !ssoEnabled(name)) return res.status(404).json({ error: `${name} sign-in is not configured on this server` });
+    const p = provider(name);
+    if (!p) return res.status(404).json({ error: `${name} sign-in is not configured on this server` });
 
     const state = b64url(crypto.randomBytes(24));
     const verifier = b64url(crypto.randomBytes(48));
     const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
 
-    res.cookie(OAUTH_COOKIE, b64url(JSON.stringify({ state, verifier, provider: name })), cookieOpts());
+    res.cookie(OAUTH_COOKIE, b64url(JSON.stringify({ state, verifier, provider: name })), cookieOpts(req));
 
     const params = new URLSearchParams({
       client_id: p.clientId,
@@ -79,12 +67,12 @@ export function registerSsoRoutes(app) {
   // Step 2: the provider sends the browser back here with ?code&state.
   app.get('/api/auth/sso/:provider/callback', async (req, res) => {
     const name = req.params.provider;
-    const p = PROVIDERS[name];
+    const p = provider(name);
     const fail = (msg) => {
       res.clearCookie(OAUTH_COOKIE, { path: '/api/auth/sso' });
       res.redirect(`${appUrl()}/login?error=${encodeURIComponent(msg)}`);
     };
-    if (!p || !ssoEnabled(name)) return fail(`${name} sign-in is not configured`);
+    if (!p) return fail(`${name} sign-in is not configured`);
 
     let saved = null;
     try { saved = JSON.parse(Buffer.from(req.cookies?.[OAUTH_COOKIE] || '', 'base64url').toString('utf8')); } catch { /* missing */ }

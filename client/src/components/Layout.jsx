@@ -8,7 +8,13 @@ export default function Layout({ children, wide = false, subtitle }) {
   const [user, setUser] = useState(null);
   const nav = useNavigate();
   useEffect(() => {
-    api('/api/auth/me', { allow401: true }).then(setUser).catch(() => nav('/login'));
+    api('/api/auth/me', { allow401: true }).then(async (u) => {
+      setUser(u);
+      // Operators on a fresh install go through the first-run wizard once.
+      if (u.is_operator && window.location.pathname === '/') {
+        try { const p = await api('/api/platform/public'); if (p.needs_setup) nav('/setup'); } catch { /* ignore */ }
+      }
+    }).catch(() => nav('/login'));
   }, []);
   const logout = async () => { await api('/api/auth/logout', { method: 'POST' }); nav('/login'); };
   return (
@@ -19,6 +25,7 @@ export default function Layout({ children, wide = false, subtitle }) {
           <NavLink to="/" end>Documents</NavLink>
           <NavLink to="/templates">Templates</NavLink>
           <NavLink to="/settings">Settings</NavLink>
+          {user?.is_operator && <NavLink to="/admin">Admin</NavLink>}
         </nav>
         {subtitle && <span className="muted hide-mobile">{subtitle}</span>}
         <span className="right">

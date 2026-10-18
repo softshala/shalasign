@@ -16,40 +16,29 @@ import { appUrl } from './mailer.js';
 import { encStr, decStr } from './crypto.js';
 import { nowSql, sqlToDate } from './util.js';
 
+import { googleConfig, microsoftConfig } from './platform.js';
+
 const COOKIE = 'sf_connect';
-const tenant = process.env.MS_TENANT || 'common';
 const LOGIN = (process.env.MS_LOGIN_BASE_URL || 'https://login.microsoftonline.com').replace(/\/$/, '');
 export const GRAPH = (process.env.GRAPH_BASE_URL || 'https://graph.microsoft.com/v1.0').replace(/\/$/, '');
 export const GOOGLE_API = (process.env.GOOGLE_API_BASE_URL || 'https://www.googleapis.com').replace(/\/$/, '');
 const GOOGLE_TOKEN = process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
 const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 
-const PROVIDERS = {
-  microsoft: {
-    label: 'Microsoft 365',
-    clientId: process.env.MS_CLIENT_ID, clientSecret: process.env.MS_CLIENT_SECRET,
-    authUrl: `${LOGIN}/${tenant}/oauth2/v2.0/authorize`,
-    tokenUrl: (t) => `${LOGIN}/${t || tenant}/oauth2/v2.0/token`,
-    base: ['openid', 'profile', 'email', 'offline_access', 'User.Read'],
-    mail: ['Mail.Send'],
-    storage: ['Files.ReadWrite'],
-    hasScope: (scopes, s) => scopes.some((x) => x.toLowerCase() === s.toLowerCase() || x.toLowerCase().endsWith('/' + s.toLowerCase())),
-  },
-  google: {
-    label: 'Google',
-    clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    authUrl: GOOGLE_AUTH,
-    tokenUrl: () => GOOGLE_TOKEN,
-    base: ['openid', 'email', 'profile'],
-    mail: ['https://www.googleapis.com/auth/gmail.send'],
-    storage: ['https://www.googleapis.com/auth/drive.file'],
-    hasScope: (scopes, s) => scopes.includes(s),
-  },
+const STATIC = {
+  microsoft: { label: 'Microsoft 365', base: ['openid', 'profile', 'email', 'offline_access', 'User.Read'], mail: ['Mail.Send'], storage: ['Files.ReadWrite'], hasScope: (scopes, s) => scopes.some((x) => x.toLowerCase() === s.toLowerCase() || x.toLowerCase().endsWith('/' + s.toLowerCase())) },
+  google: { label: 'Google', base: ['openid', 'email', 'profile'], mail: ['https://www.googleapis.com/auth/gmail.send'], storage: ['https://www.googleapis.com/auth/drive.file'], hasScope: (scopes, s) => scopes.includes(s) },
 };
+// Credentials come from the operator console (or env) and may change at runtime.
+const PROVIDERS = new Proxy({}, { get(_t, name) {
+  if (name === 'microsoft') { const c = microsoftConfig(); return c ? { ...STATIC.microsoft, clientId: c.clientId, clientSecret: c.clientSecret, authUrl: `${LOGIN}/${c.tenant}/oauth2/v2.0/authorize`, tokenUrl: (t) => `${LOGIN}/${t || c.tenant}/oauth2/v2.0/token` } : { ...STATIC.microsoft, clientId: null, clientSecret: null, authUrl: '', tokenUrl: (t) => `${LOGIN}/${t || 'common'}/oauth2/v2.0/token` }; }
+  if (name === 'google') { const c = googleConfig(); return { ...STATIC.google, clientId: c?.clientId || null, clientSecret: c?.clientSecret || null, authUrl: GOOGLE_AUTH, tokenUrl: () => GOOGLE_TOKEN }; }
+  return undefined;
+} });
 export const connectEnabled = (p) => !!(PROVIDERS[p]?.clientId && PROVIDERS[p]?.clientSecret);
 const b64url = (b) => Buffer.from(b).toString('base64url');
 const redirectUri = (p) => `${appUrl()}/api/connect/${p}/callback`;
-const cookieOpts = () => ({ httpOnly: true, sameSite: 'lax', secure: !!process.env.COOKIE_SECURE, maxAge: 10 * 60 * 1000, path: '/api/connect' });
+const cookieOpts = (req) => ({ httpOnly: true, sameSite: 'lax', secure: !!process.env.COOKIE_SECURE || !!req?.secure, maxAge: 10 * 60 * 1000, path: '/api/connect' });
 const decodeJwt = (jwt) => { try { return JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8')); } catch { return {}; } };
 
 export const getConnection = (id) => (id ? db.prepare(`SELECT * FROM connections WHERE id = ?`).get(id) : null);
@@ -187,7 +176,7 @@ export function registerConnectionRoutes(app) {
     const scopes = [...new Set([...p.base, ...(use.includes('mail') ? p.mail : []), ...(use.includes('storage') ? p.storage : []), ...prior])];
     const state = b64url(crypto.randomBytes(24)); const verifier = b64url(crypto.randomBytes(48));
     const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
-    res.cookie(COOKIE, b64url(JSON.stringify({ state, verifier, provider: name, userId: req.user.id, back: String(req.query.back || '/settings?tab=connections') })), cookieOpts());
+    res.cookie(COOKIE, b64url(JSON.stringify({ state, verifier, provider: name, userId: req.user.id, back: String(req.query.back || '/settings?tab=connections') })), cookieOpts(req));
     const params = new URLSearchParams({
       client_id: p.clientId, redirect_uri: redirectUri(name), response_type: 'code', scope: scopes.join(' '), state,
       code_challenge: challenge, code_challenge_method: 'S256',

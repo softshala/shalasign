@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import db, { getSettings } from './db.js';
 import { esc } from './util.js';
+import { smtpConfig, publicUrl, setting } from './platform.js';
 
 /**
  * Email delivery with three transports, chosen per sender:
@@ -11,19 +12,24 @@ import { esc } from './util.js';
  * Every template is branded per sender and every interpolated value is escaped.
  */
 
-const smtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-const transporter = smtpConfigured
-  ? nodemailer.createTransport({
-      host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }, connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 30_000,
-    })
-  : null;
+// Transporter is rebuilt whenever the operator changes the SMTP settings.
+let transporter = null, transporterKey = '';
+function getTransporter() {
+  const c = smtpConfig();
+  if (!c) { transporter = null; transporterKey = ''; return null; }
+  const key = JSON.stringify(c);
+  if (transporter && transporterKey === key) return transporter;
+  transporter = nodemailer.createTransport({ host: c.host, port: c.port, secure: c.port === 465, auth: { user: c.user, pass: c.pass }, connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 30_000 });
+  transporterKey = key;
+  return transporter;
+}
+const fromAddress = () => smtpConfig()?.from || '';
 
 /** Platform SMTP configured? (used for account emails + fallback) */
-export const mailEnabled = () => smtpConfigured;
+export const mailEnabled = () => !!smtpConfig();
 
 export function appUrl() {
-  return (process.env.APP_URL || 'http://localhost:4000').replace(/\/$/, '');
+  return publicUrl();
 }
 
 // Lazy import to avoid a circular dependency (connections.js imports appUrl from here).
@@ -37,7 +43,7 @@ export async function mailRouteFor(userId) {
     const r = c.resolveMailConnection(userId);
     if (r) return { via: r.conn.provider, account: r.conn.account_email, conn: r.conn };
   }
-  if (smtpConfigured) return { via: 'platform', account: process.env.FROM_EMAIL || process.env.SMTP_USER };
+  if (smtpConfig()) return { via: 'platform', account: fromAddress() };
   return null;
 }
 
@@ -90,15 +96,15 @@ async function send(to, subject, html, attachments, ctx = {}) {
       await c.apiFetch(route.conn, `${c.GOOGLE_API}/gmail/v1/users/me/messages/send`, { method: 'POST', body: { raw: raw.toString('base64url') } });
       return { sent: true, via: 'google', account: route.account };
     }
-    await transporter.sendMail({ from: process.env.FROM_EMAIL || process.env.SMTP_USER, to, subject, html: plainHtml, attachments: atts, ...(ctx.replyTo ? { replyTo: ctx.replyTo } : {}) });
+    await getTransporter().sendMail({ from: fromAddress(), to, subject, html: plainHtml, attachments: atts, ...(ctx.replyTo ? { replyTo: ctx.replyTo } : {}) });
     return { sent: true, via: 'platform', account: route.account };
   } catch (err) {
     console.error(`Email to ${to} via ${route.via} failed:`, err.message);
     // Own-inbox failure → try the platform sender so the document still goes out.
-    if (route.via !== 'platform' && smtpConfigured) {
+    if (route.via !== 'platform' && smtpConfig()) {
       try {
-        await transporter.sendMail({ from: process.env.FROM_EMAIL || process.env.SMTP_USER, to, subject, html: plainHtml, attachments: atts, ...(ctx.replyTo ? { replyTo: ctx.replyTo } : {}) });
-        return { sent: true, via: 'platform', account: process.env.FROM_EMAIL || process.env.SMTP_USER, fallback_from: route.via, error: err.message };
+        await getTransporter().sendMail({ from: fromAddress(), to, subject, html: plainHtml, attachments: atts, ...(ctx.replyTo ? { replyTo: ctx.replyTo } : {}) });
+        return { sent: true, via: 'platform', account: fromAddress(), fallback_from: route.via, error: err.message };
       } catch (e2) { return { error: `${err.message}; platform fallback: ${e2.message}` }; }
     }
     return { error: err.message };
@@ -124,14 +130,14 @@ const layout = (body, brand = {}) => {
   const color = brand.color || '#2f6fed';
   const header = brand.logoUrl
     ? `<img src="${esc(brand.logoUrl)}" alt="${esc(brand.company || 'Logo')}" style="max-height:40px;max-width:200px;display:block">`
-    : `<span style="font-size:20px;font-weight:700;color:${color}">&#9998; ${esc(brand.company || 'SignFlow')}</span>`;
+    : `<span style="font-size:20px;font-weight:700;color:${color}">&#9998; ${esc(brand.company || setting('platform_name') || 'SignFlow')}</span>`;
   return `
   <div style="font-family:Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;color:#1b2430">
     <div style="padding:18px 0">${header}</div>
     <div style="border:1px solid #e2e6ec;border-radius:10px;padding:26px">${body}</div>
     <p style="color:#9aa2ad;font-size:12px;margin-top:14px;line-height:1.5">
       ${brand.footer ? esc(brand.footer) + '<br>' : ''}
-      ${brand.company ? `Sent via SignFlow on behalf of ${esc(brand.company)}.` : 'Sent via SignFlow.'}
+      ${brand.company ? `Sent via ${esc(setting('platform_name') || 'SignFlow')} on behalf of ${esc(brand.company)}.` : `Sent via ${esc(setting('platform_name') || 'SignFlow')}.`}
     </p>
   </div>`;
 };
@@ -222,6 +228,14 @@ export function sendPasswordReset({ to, name, link }) {
       ${button(link, 'Reset password', '#2f6fed')}
       <p style="color:#68707c;font-size:13px">If you didn't ask for this, ignore this email — your password stays the same.</p>
     `));
+}
+
+/** Operator: test the platform sender itself (ignores the user's connected inbox). */
+export async function sendPlatformTest({ to, name }) {
+  const t = getTransporter();
+  if (!t) return { error: 'Platform sender is not configured' };
+  try { await t.sendMail({ from: fromAddress(), to, subject: `${setting('platform_name') || 'SignFlow'} platform email test`, html: layout(`<p>Hi ${esc(name)},</p><p>The platform sender works. Login codes, password resets and documents from users without their own inbox will be sent like this.</p>`) }); return { sent: true }; }
+  catch (e) { return { error: e.message }; }
 }
 
 /** Send a test email from whatever route the user currently has. */

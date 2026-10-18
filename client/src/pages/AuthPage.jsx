@@ -87,7 +87,9 @@ export default function AuthPage({ mode: initialMode = 'login' }) {
       <div className="auth-form-side">
         <div className="auth-card">
           <div className="auth-logo mobile-only" style={{ marginBottom: 18 }}>✒️ SignFlow</div>
+          {providers?.platform_name && providers.platform_name !== 'SignFlow' && <div className="muted small" style={{ marginBottom: 6 }}>{providers.platform_name}</div>}
           <h2 style={{ margin: '0 0 4px' }}>{headings[0]}</h2>
+          {mode === 'signup' && providers?.signup_mode === 'invite_only' && <p className="notice warn">Sign-up is by invitation only. Use the link from your invitation email.</p>}
           <p className="muted" style={{ marginTop: 0, marginBottom: 20 }}>{headings[1]}</p>
 
           {hasSso && (mode === 'login' || mode === 'signup') && (

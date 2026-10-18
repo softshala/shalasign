@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import db, { createOrgForUser, getOrg } from './db.js';
 import { appUrl, mailEnabled, sendPasswordReset } from './mailer.js';
 import { clientIp, makeLimiter, validEmail } from './util.js';
+import { allowedDomains, setting, googleConfig, microsoftConfig, isOperator } from './platform.js';
 
 const SESSION_DAYS = 30;
 const COOKIE = 'sf_session';
@@ -12,15 +13,26 @@ const COOKIE = 'sf_session';
 // sentinel (bcrypt can never match it) rather than relaxing the NOT NULL column.
 export const NO_PASSWORD = '!';
 
-// Optional allow-list of email domains for accounts created via SSO / OTP,
-// e.g. SSO_ALLOWED_DOMAINS=softshala.com,partner.in  (password signup is unaffected).
-const ALLOWED_DOMAINS = (process.env.SSO_ALLOWED_DOMAINS || '')
-  .split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
-
+// Who may create an account: an operator-set domain allow-list, and/or invite-only mode.
 export function domainAllowed(email) {
-  if (!ALLOWED_DOMAINS.length) return true;
+  const list = allowedDomains();
+  if (!list.length) return true;
   const domain = email.split('@')[1] || '';
-  return ALLOWED_DOMAINS.includes(domain);
+  return list.includes(domain);
+}
+export function signupAllowed(email) {
+  const key = email.toLowerCase().trim();
+  if (!domainAllowed(key)) return { ok: false, error: 'Accounts for this email domain are not allowed here. Ask your administrator.' };
+  if (setting('signup_mode') === 'invite_only') {
+    const invited = db.prepare(`SELECT 1 FROM org_invites WHERE email = ? AND accepted_at IS NULL AND expires_at > datetime('now')`).get(key);
+    const anyUser = db.prepare(`SELECT 1 FROM users LIMIT 1`).get();
+    if (!invited && anyUser) return { ok: false, error: 'Sign-up is by invitation only. Ask a workspace admin to invite you.' };
+  }
+  return { ok: true };
+}
+// The first account on a fresh install becomes the platform operator.
+function maybeMakeOperator(userId) {
+  if (!db.prepare(`SELECT 1 FROM users WHERE is_operator = 1`).get()) db.prepare(`UPDATE users SET is_operator = 1 WHERE id = ?`).run(userId);
 }
 
 /** Find a user by email, or create a password-less one (used by SSO and OTP). */
@@ -28,14 +40,12 @@ export function findOrCreateUser(email, name) {
   const key = email.toLowerCase().trim();
   const existing = db.prepare(`SELECT * FROM users WHERE email = ?`).get(key);
   if (existing) return existing;
-  if (!domainAllowed(key)) {
-    const err = new Error('Accounts for this email domain are not allowed. Ask your administrator.');
-    err.status = 403;
-    throw err;
-  }
+  const allowed = signupAllowed(key);
+  if (!allowed.ok) { const err = new Error(allowed.error); err.status = 403; throw err; }
   const id = nanoid(10);
   const displayName = (name || key.split('@')[0]).trim().slice(0, 80);
   db.prepare(`INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)`).run(id, displayName, key, NO_PASSWORD);
+  maybeMakeOperator(id);
   createOrgForUser(id, displayName);
   return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id);
 }
@@ -63,7 +73,7 @@ function clearFails(email) { fails.delete(email); }
 
 const publicUser = (u) => {
   const org = getOrg(u.org_id);
-  return { id: u.id, name: u.name, email: u.email, has_password: u.password_hash !== NO_PASSWORD, role: u.role || 'member', org: org ? { id: org.id, name: org.name, email_mode: org.email_mode, storage_mode: org.storage_mode, visibility: org.visibility } : null };
+  return { id: u.id, name: u.name, email: u.email, has_password: u.password_hash !== NO_PASSWORD, role: u.role || 'member', is_operator: isOperator(u), org: org ? { id: org.id, name: org.name, email_mode: org.email_mode, storage_mode: org.storage_mode, visibility: org.visibility } : null };
 };
 
 export function registerAuthRoutes(app) {
@@ -82,9 +92,11 @@ export function registerAuthRoutes(app) {
     const key = email.toLowerCase().trim();
     const existing = db.prepare(`SELECT id FROM users WHERE email = ?`).get(key);
     if (existing) return res.status(409).json({ error: 'An account with this email already exists — try logging in' });
+    if (!invite) { const allowed = signupAllowed(key); if (!allowed.ok) return res.status(403).json({ error: allowed.error }); }
     const id = nanoid(10);
     db.prepare(`INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)`)
       .run(id, name.trim().slice(0, 80), key, bcrypt.hashSync(password, 10));
+    maybeMakeOperator(id);
     createOrgForUser(id, name.trim());
     let joined = null;
     if (invite) {
@@ -127,10 +139,12 @@ export function registerAuthRoutes(app) {
   app.get('/api/auth/providers', (_req, res) => {
     res.json({
       password: true,
-      google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-      microsoft: !!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET),
+      google: !!googleConfig(),
+      microsoft: !!microsoftConfig(),
       otp: mailEnabled() || !!process.env.OTP_DEV_LOG,
       password_reset: mailEnabled() || !!process.env.OTP_DEV_LOG,
+      signup_mode: setting('signup_mode'),
+      platform_name: setting('platform_name'),
     });
   });
 
@@ -184,7 +198,7 @@ export function startSession(res, userId) {
   res.cookie(COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: !!process.env.COOKIE_SECURE,
+    secure: !!process.env.COOKIE_SECURE || !!res.req?.secure, // auto: secure whenever the request arrived over https
     maxAge: SESSION_DAYS * 864e5,
   });
 }

@@ -23,10 +23,8 @@ Render runs your app on their computers and gives it an https address.
 1. Go to render.com and sign up (easiest: "Sign up with GitHub").
 2. Click "New +" → "Blueprint" → connect your `signflow` repository → Apply.
    Render reads the `render.yaml` file in the project and sets everything up.
-3. In the service's **Environment** tab, add your email settings (same values
-   as your local `.env` file): SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
-   FROM_EMAIL — and set APP_URL to the address Render gave you
-   (looks like `https://signflow-xxxx.onrender.com`).
+3. That's the whole server side. Email, sign-in providers and access rules are
+   set up in the browser afterwards (first account → setup wizard → Admin).
 4. Wait for the deploy to finish (a few minutes). Open the address — you'll
    see the SignFlow login screen. That address now works for everyone,
    everywhere, phones included.
@@ -53,13 +51,12 @@ In Render → Settings → Custom Domains you can attach `sign.softshala.com`.
 Whoever manages the softshala.com domain adds one DNS record (Render shows
 exactly what). Then update APP_URL to the new address.
 
-## Optional extras (all in the Environment tab)
+## After the first deploy
 
-- **Google / Microsoft sign-in**: `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`,
-  `MS_CLIENT_ID`/`MS_CLIENT_SECRET`/`MS_TENANT` — setup steps in the README.
-- **Company-only accounts**: `SSO_ALLOWED_DOMAINS=softshala.com`.
-- **OneDrive archive of signed documents**: `ONEDRIVE_USER=someone@softshala.com`
-  (plus a Graph permission on the Microsoft app — see README).
+Open the address, create the first account — it becomes the platform operator —
+and follow the setup wizard: platform name, email sender (with a test button),
+and optionally the Microsoft and Google apps. Everything can be revisited under
+**Admin**. Users then connect their own inbox and drive from Settings.
 
 ## Afterwards
 

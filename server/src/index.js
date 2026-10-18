@@ -17,6 +17,7 @@ import { registerOrgRoutes } from './orgs.js';
 import { registerOAuthRoutes, userForAccessToken } from './oauth.js';
 import { registerMcpRoutes } from './mcp.js';
 import { registerAssistantRoutes } from './assistant.js';
+import { registerPlatformRoutes, setupStatus, rememberOrigin, setting, publicUrl } from './platform.js';
 import { setOAuthLookup } from './auth.js';
 import { startScheduler } from './scheduler.js';
 
@@ -25,8 +26,15 @@ fs.mkdirSync(path.join(STORAGE_DIR, 'uploads'), { recursive: true });
 
 const app = express();
 app.disable('x-powered-by');
-// Behind Render/any reverse proxy: trust the first hop so req.ip and secure cookies are right.
-if (process.env.RENDER || process.env.TRUST_PROXY) app.set('trust proxy', 1);
+// Proxy trust is decided per request from the operator setting: 'on', 'off', or 'auto'
+// (trust when the connecting peer is a loopback/private address or we run on Render).
+const isPrivate = (ip) => /^(::1|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::ffff:(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|fc|fd)/.test(ip || '');
+app.set('trust proxy', (ip) => {
+  const mode = setting('trust_proxy') || 'auto';
+  if (mode === 'on' || process.env.TRUST_PROXY === '1') return true;
+  if (mode === 'off') return false;
+  return !!process.env.RENDER || isPrivate(ip);
+});
 
 // Security headers (no dependency needed).
 app.use((req, res, next) => {
@@ -34,8 +42,9 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
-  if (process.env.COOKIE_SECURE) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  if (process.env.COOKIE_SECURE || req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  if (req.method === 'GET' && !req.path.startsWith('/api/') && !req.path.startsWith('/assets/')) rememberOrigin(req); // learn the public URL
   next();
 });
 
@@ -57,14 +66,16 @@ app.get('/api/health', (_req, res) => {
     storage_dir_from_env: !!process.env.STORAGE_DIR,
     storage_is_persistent_disk: persistent,
     encryption_key_source: process.env.SIGNFLOW_SECRET ? 'env' : 'file-in-storage-dir',
-    email_configured: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
-    connect_providers: { microsoft: !!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET), google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) },
-    assistant_platform_key_shared: process.env.ASSISTANT_SHARED_KEY === '1' && !!process.env.ANTHROPIC_API_KEY,
-    mcp_url: `${process.env.APP_URL || 'http://localhost:' + (process.env.PORT || 4000)}/mcp`,
+    email_configured: setupStatus().email,
+    connect_providers: { microsoft: setupStatus().microsoft, google: setupStatus().google },
+    assistant_platform_key_shared: setupStatus().assistant_shared,
+    public_url: publicUrl(), public_url_source: setupStatus().url_source,
+    setup_done: setupStatus().setup_done, operator_exists: setupStatus().operator_exists,
+    mcp_url: `${publicUrl()}/mcp`,
     warnings: [
       ...(!persistent ? ['Storage is NOT a persistent disk: accounts, documents and sessions are erased on every deploy/restart. Attach a disk and set STORAGE_DIR to its mount path.'] : []),
       ...(process.env.RENDER && !process.env.SIGNFLOW_SECRET ? ['SIGNFLOW_SECRET is not set: the encryption key lives on the data disk, so disk backups can be decrypted by whoever holds them.'] : []),
-      ...(!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) ? ['Platform email (SMTP_*) is not configured: users must connect their own inbox to send; login codes and password resets are off.'] : []),
+      ...(!setupStatus().email ? ['Platform email is not configured (operator console → Email): users must connect their own inbox to send; login codes and password resets are off.'] : []),
     ],
   });
 });
@@ -83,6 +94,7 @@ setOAuthLookup(userForAccessToken);
 registerOAuthRoutes(app);
 registerMcpRoutes(app);
 registerAssistantRoutes(app);
+registerPlatformRoutes(app);
 
 // JSON 404 for unknown API routes, and a JSON error handler.
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));

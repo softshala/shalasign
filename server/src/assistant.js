@@ -7,10 +7,12 @@ import { requireAuth } from './auth.js';
 import { anthropicTools, runTool } from './tools.js';
 import { appUrl } from './mailer.js';
 import { encStr, decStr } from './crypto.js';
+import { sharedAssistantKey, setting } from './platform.js';
 
-const MODEL = process.env.ASSISTANT_MODEL || 'claude-opus-5-5';
-// The operator's own key is used ONLY when they explicitly opt in to paying for everyone.
-const platformKey = () => (process.env.ASSISTANT_SHARED_KEY === '1' ? process.env.ANTHROPIC_API_KEY || null : null);
+const MODEL_DEFAULT = 'claude-opus-5-5';
+const model = () => setting('assistant_model') || MODEL_DEFAULT;
+// The operator's own key is used ONLY when they explicitly opt in (console or ASSISTANT_SHARED_KEY=1).
+const platformKey = () => sharedAssistantKey();
 export const assistantEnabled = () => true; // the feature exists; whether a given user can use it depends on resolveKey()
 
 /** Which Anthropic key runs the assistant for this user: workspace key (admin-set) → their own key → platform (opt-in). */
@@ -28,7 +30,7 @@ const hintOf = (k) => `…${k.slice(-4)}`;
 const validKey = (k) => /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(k);
 async function verifyKey(key) {
   // Cheapest possible call: no tokens are generated.
-  await getClient(key).models.retrieve(MODEL);
+  await getClient(key).models.retrieve(model());
 }
 
 const MAX_TURNS = 8;       // tool-call rounds per user message
@@ -68,7 +70,7 @@ export function registerAssistantRoutes(app) {
   app.get('/api/assistant/status', requireAuth, (req, res) => {
     const k = resolveKey(req.user);
     const s = getSettings(req.user.id); const org = getOrg(req.user.org_id);
-    res.json({ enabled: !!k, source: k?.source || null, hint: k?.hint || null, model: MODEL, tools: anthropicTools().map((t) => t.name),
+    res.json({ enabled: !!k, source: k?.source || null, hint: k?.hint || null, model: model(), tools: anthropicTools().map((t) => t.name),
       has_own_key: !!s.anthropic_key, own_hint: s.anthropic_key_hint || null,
       workspace_key: !!org?.anthropic_key, workspace_hint: org?.anthropic_key_hint || null, is_admin: isOrgAdmin(req.user),
       platform_offered: !!platformKey() });
@@ -118,7 +120,7 @@ export function registerAssistantRoutes(app) {
     try {
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         const response = await anthropic.beta.messages.create({
-          model: MODEL,
+          model: model(),
           max_tokens: 8000,
           system: systemPrompt(req.user),
           tools: anthropicTools(),
@@ -160,4 +162,4 @@ export function registerAssistantRoutes(app) {
   });
 }
 
-export const assistantInfo = () => ({ model: MODEL, mcp_url: `${appUrl()}/mcp`, platform_key_shared: !!platformKey() });
+export const assistantInfo = () => ({ model: model(), mcp_url: `${appUrl()}/mcp`, platform_key_shared: !!platformKey() });

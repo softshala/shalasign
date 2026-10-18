@@ -7,13 +7,15 @@ import { readDecrypted } from './crypto.js';
 import { resolveStorageTarget, apiFetch, accessTokenFor, GRAPH, GOOGLE_API } from './connections.js';
 import { archiveEnvelope as legacyArchive, oneDriveEnabled as legacyEnabled, oneDriveTarget as legacyTarget } from './onedrive.js';
 
-const TZ = process.env.ONEDRIVE_TIMEZONE || 'Asia/Kolkata';
+import { setting } from './platform.js';
+const TZ_FALLBACK = 'Asia/Kolkata';
 const SIMPLE_MAX = 4 * 1024 * 1024;
 const CHUNK = 10 * 1024 * 1024;
 
 const safeName = (s) => String(s || '').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, 120) || 'Document';
 function stamp(utcStr) {
   const d = utcStr ? new Date(utcStr.replace(' ', 'T') + 'Z') : new Date();
+  const TZ = setting('archive_timezone') || TZ_FALLBACK;
   let fmt; try { fmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
   catch { fmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
   const p = Object.fromEntries(fmt.formatToParts(d).map((x) => [x.type, x.value]));

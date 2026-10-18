@@ -272,6 +272,14 @@ CREATE TABLE IF NOT EXISTS connections (
   UNIQUE (user_id, provider)
 );
 
+-- Platform configuration editable from the operator console (secrets encrypted).
+CREATE TABLE IF NOT EXISTS platform_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- OAuth 2.1 server for MCP clients (claude.ai connectors etc.).
 CREATE TABLE IF NOT EXISTS oauth_clients (
   id TEXT PRIMARY KEY,
@@ -344,6 +352,12 @@ addColumn('envelopes', 'org_id TEXT');
 addColumn('templates', 'org_id TEXT');
 addColumn('folders', 'org_id TEXT');
 for (const def of ['mail_connection_id TEXT', 'archive_connection_id TEXT', 'archive_root_id TEXT', 'archive_root_path TEXT', 'anthropic_key TEXT', 'anthropic_key_hint TEXT']) addColumn('user_settings', def);
+addColumn('users', 'is_operator INTEGER NOT NULL DEFAULT 0'); // platform operator (configures email, providers, access)
+// The very first account becomes the operator if nobody is one yet.
+if (!db.prepare(`SELECT 1 FROM users WHERE is_operator = 1`).get()) {
+  const first = db.prepare(`SELECT id FROM users ORDER BY created_at, rowid LIMIT 1`).get();
+  if (first) db.prepare(`UPDATE users SET is_operator = 1 WHERE id = ?`).run(first.id);
+}
 addColumn('orgs', 'anthropic_key TEXT');          // encrypted; optional workspace-wide key set by an admin
 addColumn('orgs', 'anthropic_key_hint TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS idx_env_org ON envelopes(org_id)');
