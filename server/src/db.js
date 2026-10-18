@@ -346,6 +346,8 @@ addColumn('fields', 'merge_key TEXT');                    // bound to a data col
 addColumn('fields', 'cover INTEGER NOT NULL DEFAULT 0');  // white-out the original {{tag}} text under the field
 addColumn('fields', 'meta TEXT');                         // JSON: e.g. signature fit {x,y,w,h} inside the field
 addColumn('envelopes', 'merge_json TEXT');                // the merge values used for this envelope (audit/record)
+addColumn('envelopes', 'summary_json TEXT');              // AI "What am I signing?" briefing for signers
+addColumn('envelopes', 'document_text TEXT');             // extracted text (for the briefing; kept short)
 addColumn('users', 'org_id TEXT');
 addColumn('users', "role TEXT NOT NULL DEFAULT 'member'");          // owner | admin | member (within the org)
 addColumn('envelopes', 'org_id TEXT');

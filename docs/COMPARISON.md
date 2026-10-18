@@ -97,6 +97,9 @@ October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/
 | Zapier / Power Automate connectors | 🟡 via webhook + API | ✅ | ✅ |
 | MCP server — use it from Claude (claude.ai, Desktop, Code) | ✅ built in, OAuth | ❌ | ❌ |
 | AI assistant inside the app that performs actions | ✅ Claude with the same tools | 🟡 Acrobat AI Assistant (document Q&A) | 🟡 Zia (summaries) |
+| AI field placement from document text | ✅ | ✅ (auto-detect form fields) | 🟡 |
+| AI summary for signers ("What am I signing?") | ✅ | 🟡 AI Assistant for readers | 🟡 Zia summary |
+| Natural-language send bar with attached PDF | ✅ | ❌ | ❌ |
 | Payments collection during signing | ❌ | ✅ | ✅ 💰 |
 
 ## Pricing & deployment

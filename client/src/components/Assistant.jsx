@@ -13,13 +13,20 @@ export default function Assistant() {
   const endRef = useRef(null);
 
   useEffect(() => { api('/api/assistant/status').then(setStatus).catch(() => setStatus({ enabled: false })); }, []);
+  // Other parts of the app (the dashboard send bar) can hand us a message.
+  const pendingRef = useRef(null);
+  useEffect(() => {
+    const onAsk = (e) => { setOpen(true); if (e.detail?.send) pendingRef.current = e.detail.message; else setInput(e.detail?.message || ''); };
+    window.addEventListener('signflow:ask', onAsk); return () => window.removeEventListener('signflow:ask', onAsk);
+  }, []);
+  useEffect(() => { if (pendingRef.current && status?.enabled && open && !busy) { const m = pendingRef.current; pendingRef.current = null; sendText(m); } });
   useEffect(() => { try { sessionStorage.setItem(KEY, JSON.stringify(thread)); } catch { /* ignore */ } endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [thread, open]);
 
   if (!status) return null;
 
-  const send = async (e) => {
-    e?.preventDefault();
-    const text = input.trim(); if (!text || busy) return;
+  const send = (e) => { e?.preventDefault(); sendText(input); };
+  const sendText = async (raw) => {
+    const text = String(raw || '').trim(); if (!text || busy) return;
     setInput(''); setBusy(true);
     setThread((t) => ({ ...t, turns: [...t.turns, { role: 'user', text }] }));
     try {

@@ -15,7 +15,23 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [ask, setAsk] = useState({ text: '', file: null });
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const askFileRef = useRef(null);
   const fileRef = useRef(null);
+  useEffect(() => { api('/api/assistant/status').then((s) => setAiEnabled(!!s.enabled)).catch(() => {}); }, []);
+  const askSend = async (e) => {
+    e.preventDefault();
+    const text = ask.text.trim(); if (!text && !ask.file) return;
+    let msg = text;
+    if (ask.file) {
+      setUploading(true);
+      try { const fd = new FormData(); fd.append('pdf', ask.file); fd.append('title', ask.file.name.replace(/\.pdf$/i, '')); const d = await api('/api/envelopes', { method: 'POST', formData: fd }); msg = `${text || 'Send this document for signature.'}\n(Document "${d.title}" is uploaded as draft id ${d.id}.)`; if (!aiEnabled) { nav(`/prepare/${d.id}`); return; } }
+      catch (err) { toast(err.message, { bad: true }); return; } finally { setUploading(false); }
+    }
+    window.dispatchEvent(new CustomEvent('signflow:ask', { detail: { message: msg, send: true } }));
+    setAsk({ text: '', file: null });
+  };
   const nav = useNavigate();
   const toast = useToast();
   const LIMIT = 25;
@@ -99,6 +115,17 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {aiEnabled && (
+          <form className="card tight" onSubmit={askSend} style={{ background: '#f7faff', borderColor: '#c9dafb' }}>
+            <div className="row" style={{ gap: 8 }}>
+              <span style={{ fontSize: 18 }}>✨</span>
+              <input value={ask.text} onChange={(e) => setAsk({ ...ask, text: e.target.value })} placeholder='Tell SignFlow what to do, e.g. "Send the NDA template to asha@acme.com, company Acme" — or attach a PDF and say who signs' style={{ flex: 1, minWidth: 220 }} />
+              <input ref={askFileRef} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={(e) => setAsk({ ...ask, file: e.target.files?.[0] || null })} />
+              <button type="button" className="secondary" onClick={() => askFileRef.current.click()}>{ask.file ? `📎 ${ask.file.name.slice(0, 18)}${ask.file.name.length > 18 ? '…' : ''}` : '📎 Attach PDF'}</button>
+              <button disabled={uploading || (!ask.text.trim() && !ask.file)}>{uploading ? 'Uploading…' : 'Go'}</button>
+            </div>
+          </form>
+        )}
         {stats && (
           <div className="stats">
             <Stat n={stats.sent} label="Awaiting signature" active={filters.status === 'sent'} onClick={() => setStatus('sent')} />

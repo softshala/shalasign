@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast.jsx';
 import { api, copyText, fitFont } from '../api.js';
 import DataImporter from '../components/DataImporter.jsx';
 import { scanTags } from '../lib/tags.js';
+import { extractTextLayout } from '../lib/pdftext.js';
 
 const TOOLS = [
   { type: 'signature', label: '✍️ Signature', w: 0.24, h: 0.055 },
@@ -32,6 +33,9 @@ export default function Prepare() {
   const [mergeData, setMergeData] = useState({});        // single send: typed merge values
   const [previewIdx, setPreviewIdx] = useState(0);       // which recipient's data to preview
   const [scanning, setScanning] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [aiStatus, setAiStatus] = useState(null);      // /api/assistant/status
+  const layoutRef = useRef(null);                       // extracted text layout (lazy)
   const [activeSigner, setActiveSigner] = useState(0);
   const [tool, setTool] = useState('signature');
   const [fields, setFields] = useState([]);
@@ -54,6 +58,7 @@ export default function Prepare() {
     (async () => {
       try {
         const [e, f, s] = await Promise.all([api(`/api/envelopes/${id}`), api('/api/folders'), api('/api/settings')]);
+        api('/api/assistant/status').then(setAiStatus).catch(() => setAiStatus({ enabled: false }));
         if (e.status !== 'draft') return nav(`/envelope/${id}`);
         setEnv(e); setFolders(f); setDefaults(s.defaults); setTitle(e.title);
         const d = e.draft;
@@ -102,6 +107,23 @@ export default function Prepare() {
     });
     return out;
   }, [bulkRows, requiredKeys]);
+  const getLayout = async () => { if (!layoutRef.current) layoutRef.current = await extractTextLayout(`/api/envelopes/${id}/pdf`); return layoutRef.current; };
+  const suggestFields = async () => {
+    setSuggesting(true); setError('');
+    try {
+      const layout = await getLayout();
+      const r = await api('/api/ai/suggest-fields', { method: 'POST', body: { envelope_id: id, pages: layout.pages, lines: layout.lines, signers: bulk ? [{ name: 'Recipient', role: 'Recipient' }] : signers.map((s) => ({ name: s.name, role: s.role })) } });
+      if (!r.fields.length) { toast('Claude found no obvious places for fields in this document'); return; }
+      const near = (a, b) => a.page === b.page && Math.abs(a.x - b.x) < 0.02 && Math.abs(a.y - b.y) < 0.02;
+      const fresh = r.fields.filter((f) => !fields.some((g) => near(f, g))).map((f) => ({ key: key(), ...f, signerIndex: bulk ? 0 : Math.min(f.signerIndex, Math.max(0, signers.length - 1)), suggested: true }));
+      setFields((fs) => [...fs, ...fresh]);
+      toast(`✨ ${fresh.length} field${fresh.length === 1 ? '' : 's'} suggested — review, drag to adjust, or remove with ×`, { ms: 6000 });
+    } catch (e) { if (e.status === 402) setError('AI suggestions need your Anthropic API key — add it in Settings → Claude & MCP.'); else setError(e.message); }
+    finally { setSuggesting(false); }
+  };
+  const acceptSuggestions = () => setFields((fs) => fs.map(({ suggested: _s, reason: _r, ...f }) => f));
+  const dropSuggestions = () => setFields((fs) => fs.filter((f) => !f.suggested));
+  const suggestedCount = fields.filter((f) => f.suggested).length;
   const detectTags = async () => {
     setScanning(true); setError('');
     try {
@@ -165,7 +187,9 @@ export default function Prepare() {
   const send = async () => {
     setError('');
     if (!fields.some((f) => f.type === 'signature')) return setError('Place at least one signature field on the document.');
-    const common = { fields: fields.map(({ key: _k, ...f }) => f), folder_id: opts.folder_id || null, access_code: opts.access_code || null, expiry_days: opts.expiry_days === '' ? undefined : opts.expiry_days, reminder_days: opts.reminder_days === '' ? undefined : opts.reminder_days };
+    let document_text = '';
+    if (aiStatus?.enabled) { try { document_text = (await getLayout()).fullText.slice(0, 20000); } catch { /* scanned PDF or extraction failure: no briefing */ } }
+    const common = { document_text, fields: fields.map(({ key: _k, suggested: _s, reason: _r, ...f }) => f), folder_id: opts.folder_id || null, access_code: opts.access_code || null, expiry_days: opts.expiry_days === '' ? undefined : opts.expiry_days, reminder_days: opts.reminder_days === '' ? undefined : opts.reminder_days };
     setBusy(true);
     try {
       if (bulk) {
@@ -300,6 +324,13 @@ export default function Prepare() {
             {TOOLS.map((t) => (
               <button key={t.type} className={tool === t.type ? 'active' : ''} onClick={() => setTool(t.type)}>{t.label}</button>
             ))}
+            <button className="secondary" style={{ background: '#eef5ff', color: '#1e3a8a' }} disabled={suggesting} onClick={suggestFields} title={aiStatus?.enabled ? 'Claude reads the document and proposes where signature, date and text fields go' : 'Needs your Anthropic API key (Settings → Claude & MCP)'}>{suggesting ? '✨ Reading the document…' : '✨ Suggest fields with AI'}</button>
+            {suggestedCount > 0 && (
+              <div className="notice" style={{ margin: '0 0 8px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ flex: 1 }}>{suggestedCount} suggested field{suggestedCount === 1 ? '' : 's'} (dashed blue). Hover one to see why.</span>
+                <button className="small" onClick={acceptSuggestions}>Keep all</button><button className="secondary small" onClick={dropSuggestions}>Remove all</button>
+              </div>
+            )}
             <button className="secondary" style={{ background: '#fff4e0', color: '#7a4a00' }} disabled={scanning} onClick={detectTags} title="Finds {{sig:1}}, {{date:1}}, {{Company}}… typed in the document and places fields over them">{scanning ? 'Scanning…' : '🔍 Detect {{tags}} in document'}</button>
             <p className="muted">Click the document to place the selected field. Drag to move, pull the corner to resize, press Delete to remove. Type <code>{'{{Company}}'}</code> in your document and click <em>Detect tags</em> to place merge fields automatically.</p>
             {mergeKeys.length > 0 && !bulk && (
@@ -393,11 +424,11 @@ export default function Prepare() {
             renderOverlay={(pageIndex, size) => fields.filter((f) => f.page === pageIndex).map((f) => (
               <div
                 key={f.key}
-                className={`field-box s${f.signerIndex % 4} ${selected === f.key ? 'selected' : ''} ${f.merge_key ? 'merge' : ''}`}
+                className={`field-box s${f.signerIndex % 4} ${selected === f.key ? 'selected' : ''} ${f.merge_key ? 'merge' : ''} ${f.suggested ? 'suggested' : ''}`}
                 style={{ left: f.x * size.width, top: f.y * size.height, width: f.w * size.width, height: f.h * size.height, ...(f.merge_key ? { background: f.cover ? '#fff' : 'rgba(255,244,224,0.9)', borderStyle: 'dashed', borderColor: '#c77700', color: '#1b2430', fontSize: fitFont(mergePreview(f), f.w * size.width, f.h * size.height), whiteSpace: 'nowrap', justifyContent: 'flex-start', paddingLeft: 3 } : {}) }}
                 onPointerDown={(e) => startDrag(e, f.key, size, 'move')}
                 onClick={(e) => { e.stopPropagation(); setSelected(f.key); }}
-                title={`${f.type} · ${signers[f.signerIndex]?.name || signers[f.signerIndex]?.role || `Signer ${f.signerIndex + 1}`}`}
+                title={`${f.type} · ${signers[f.signerIndex]?.name || signers[f.signerIndex]?.role || `Signer ${f.signerIndex + 1}`}${f.reason ? ` · ✨ ${f.reason}` : ''}`}
               >
                 {f.merge_key ? mergePreview(f) : (<>
                   {f.label && f.type !== 'signature' ? <span className="lbl">{f.label}</span> : null}

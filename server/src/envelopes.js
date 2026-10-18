@@ -14,6 +14,7 @@ import { queueWebhook } from './webhooks.js';
 import { archiveEnvelope, archiveEnabledFor, archiveTargetLabel } from './storage.js';
 import { findEnvelope, envelopeScope, canEdit } from './scope.js';
 import { actorOf, addDays, clampInt, clientIp, nowSql, safeFilename, validEmail } from './util.js';
+import { summarizeInBackground } from './ai.js';
 
 const UPLOADS = path.join(STORAGE_DIR, 'uploads');
 fs.mkdirSync(UPLOADS, { recursive: true });
@@ -209,6 +210,8 @@ export function registerEnvelopeRoutes(app) {
       folder_name: folder?.name || null,
       cc: parseJson(env.cc_json, []),
       merge: parseJson(env.merge_json, null),
+      summary: parseJson(env.summary_json, null),
+      document_text: undefined,
       draft: env.status === 'draft' ? parseJson(env.draft_json, null) : undefined,
       draft_json: undefined,
       signers: signers.map((s) => ({ ...s, signing_url: `${appUrl()}/sign/${s.token}`, your_turn: env.status === 'sent' && s.status === 'pending' && isSignerTurn(env, s) })),
@@ -327,6 +330,8 @@ export function registerEnvelopeRoutes(app) {
     const usedKeys = mergeKeysOf(fields);
     if (usedKeys.length) audit(env.id, 'merge.applied', actorOf(req.user), `Merge data: ${usedKeys.map((k) => `${k}="${(mergeData[Object.keys(mergeData).find((c) => c.toLowerCase() === k.toLowerCase())] ?? '').slice(0, 60)}"`).join(', ')}`, clientIp(req));
 
+    const docText = typeof b.document_text === 'string' ? b.document_text.slice(0, 20000) : '';
+    if (docText) { db.prepare(`UPDATE envelopes SET document_text = ? WHERE id = ?`).run(docText, env.id); summarizeInBackground(env.id, req.user.id, docText); }
     await notifyPendingSigners(env.id);
     queueWebhook(req.user.id, 'envelope.sent', envelopePayload(env.id));
     const route = await mailRouteFor(env.user_id);
@@ -397,6 +402,9 @@ export function registerEnvelopeRoutes(app) {
     });
     try { fs.unlinkSync(draft.original_pdf); } catch { /* ignore */ }
 
+    // One briefing per bulk batch (same document text for every copy).
+    const bulkText = typeof b.document_text === 'string' ? b.document_text.slice(0, 20000) : '';
+    if (bulkText) { for (const id of envIds) db.prepare(`UPDATE envelopes SET document_text = ? WHERE id = ?`).run(bulkText, id); summarizeInBackground(envIds[0], req.user.id, bulkText); const first = envIds[0]; setTimeout(() => { const s = db.prepare(`SELECT summary_json FROM envelopes WHERE id = ?`).get(first)?.summary_json; if (s) for (const id of envIds.slice(1)) db.prepare(`UPDATE envelopes SET summary_json = ? WHERE id = ?`).run(s, id); }, 45_000); }
     // Emails go out in the background so 500 recipients don't block the request.
     (async () => { for (const id of envIds) { try { await notifyPendingSigners(id); } catch (e) { console.error('[bulk] notify failed', id, e.message); } } })();
     const route = await mailRouteFor(req.user.id);

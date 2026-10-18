@@ -85,6 +85,7 @@ export function registerSigningRoutes(app) {
 
     res.json({
       envelope: { id: env.id, title: env.title, message: env.message, status: env.status, expires_at: env.expires_at, page_count: env.page_count, sequential: !!env.sequential },
+      summary: (() => { try { return env.summary_json ? JSON.parse(env.summary_json) : null; } catch { return null; } })(),
       signer: { name: signer.name, email: signer.email, status: signer.status, order_index: signer.order_index, private_message: signer.private_message || '', signed_at: signer.signed_at, decline_reason: signer.decline_reason },
       your_turn: env.status === 'sent' && signer.status === 'pending' && isSignerTurn(env, signer),
       can_download: env.status === 'completed' && !!env.signer_pdf,

@@ -18,6 +18,7 @@ import { registerOAuthRoutes, userForAccessToken } from './oauth.js';
 import { registerMcpRoutes } from './mcp.js';
 import { registerAssistantRoutes } from './assistant.js';
 import { registerPlatformRoutes, setupStatus, rememberOrigin, setting, publicUrl } from './platform.js';
+import { registerAiRoutes } from './ai.js';
 import { setOAuthLookup } from './auth.js';
 import { startScheduler } from './scheduler.js';
 
@@ -95,6 +96,7 @@ registerOAuthRoutes(app);
 registerMcpRoutes(app);
 registerAssistantRoutes(app);
 registerPlatformRoutes(app);
+registerAiRoutes(app);
 
 // JSON 404 for unknown API routes, and a JSON error handler.
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));

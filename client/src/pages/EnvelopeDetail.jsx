@@ -77,6 +77,13 @@ export default function EnvelopeDetail() {
         </div>
       </div>
 
+      {env.summary && (
+        <div className="card tight" style={{ borderColor: '#c9dafb', background: '#f7faff' }}>
+          <strong>✨ Signer briefing</strong> <span className="muted small">shown to signers above the document</span>
+          <p style={{ fontSize: 14, margin: '6px 0 0' }}>{env.summary.summary}</p>
+          {env.summary.caution && <p className="notice warn" style={{ margin: '6px 0 0' }}>⚠️ {env.summary.caution}</p>}
+        </div>
+      )}
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Signers</h3>
         <ul className="timeline">

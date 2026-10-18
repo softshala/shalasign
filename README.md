@@ -37,6 +37,13 @@ emailed one-time code login, password reset, login throttling. Workspaces with
 owner/admin/member roles, invitations, shared folders and templates, and an
 admin choice between individual and shared sending/storage.
 
+**AI, on the user's own key** — a dashboard send bar ("Send this to asha@acme.com,
+signature on page 3" + a dropped PDF), **AI field suggestions** that read the
+document text and place signature/date/text fields where the document expects
+them, a **"What am I signing?" briefing** shown to signers (summary, key terms,
+obligations, cautions; clearly marked as AI-generated), and the ✨ Ask
+assistant with the same tools as the MCP server.
+
 **Connected accounts** — one-click "Connect Microsoft 365 / Google": signing
 emails go out from the user's own inbox and completed documents land in the
 OneDrive or Google Drive folder they picked. No per-customer server setup.
