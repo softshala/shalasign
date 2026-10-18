@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
+import Assistant from './Assistant.jsx';
 
 /** Top bar + auth guard for sender pages. Renders children once the user is known. */
 export default function Layout({ children, wide = false, subtitle }) {
@@ -27,6 +28,7 @@ export default function Layout({ children, wide = false, subtitle }) {
         </span>
       </div>
       <div className={`container ${wide ? 'wide' : ''}`}>{user ? children : null}</div>
+      {user && <Assistant />}
     </>
   );
 }

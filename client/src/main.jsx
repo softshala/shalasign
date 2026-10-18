@@ -8,6 +8,7 @@ import Settings from './pages/Settings.jsx';
 import Templates from './pages/Templates.jsx';
 import NotFound from './pages/NotFound.jsx';
 import Join from './pages/Join.jsx';
+import OAuthConsent from './pages/OAuthConsent.jsx';
 import { ToastProvider } from './components/Toast.jsx';
 import './styles.css';
 
@@ -27,6 +28,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/login" element={<AuthPage />} />
             <Route path="/reset/:token" element={<AuthPage mode="reset" />} />
             <Route path="/join/:token" element={<Join />} />
+            <Route path="/oauth/consent" element={<OAuthConsent />} />
             <Route path="/templates" element={<Templates />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/prepare/:id" element={<Prepare />} />

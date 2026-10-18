@@ -272,6 +272,42 @@ CREATE TABLE IF NOT EXISTS connections (
   UNIQUE (user_id, provider)
 );
 
+-- OAuth 2.1 server for MCP clients (claude.ai connectors etc.).
+CREATE TABLE IF NOT EXISTS oauth_clients (
+  id TEXT PRIMARY KEY,
+  secret_hash TEXT,
+  name TEXT NOT NULL,
+  redirect_uris TEXT NOT NULL,                        -- JSON array
+  logo_uri TEXT DEFAULT '',
+  client_uri TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS oauth_codes (
+  code_hash TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  code_challenge TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'signflow',
+  resource TEXT DEFAULT '',
+  used INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'signflow',
+  access_hash TEXT NOT NULL UNIQUE,
+  access_expires_at TEXT NOT NULL,
+  refresh_hash TEXT NOT NULL UNIQUE,
+  refresh_expires_at TEXT NOT NULL,
+  revoked INTEGER NOT NULL DEFAULT 0,
+  last_used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Outgoing webhook deliveries (for retries + visibility).
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

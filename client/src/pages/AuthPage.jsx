@@ -27,11 +27,13 @@ export default function AuthPage({ mode: initialMode = 'login' }) {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
+  const nextUrl = (() => { const n = new URLSearchParams(window.location.search).get('next'); return n && n.startsWith('/') && !n.startsWith('//') ? n : '/'; })();
+  const go = () => (nextUrl !== '/' ? window.location.assign(nextUrl) : nav('/'));
 
   useEffect(() => {
     api('/api/auth/providers').then(setProviders).catch(() => setProviders({ password: true }));
     const err = new URLSearchParams(window.location.search).get('error');
-    if (err) { setError(err); window.history.replaceState({}, '', window.location.pathname); }
+    if (err) { setError(err); const u = new URL(window.location.href); u.searchParams.delete('error'); window.history.replaceState({}, '', u.pathname + u.search); }
   }, []);
 
   useEffect(() => {
@@ -46,15 +48,15 @@ export default function AuthPage({ mode: initialMode = 'login' }) {
   };
   const switchMode = (m) => { setMode(m); setError(''); setNotice(''); setOtp({ step: 'email', code: '', newAccount: false, cooldown: 0 }); };
 
-  const submitPassword = (e) => { e.preventDefault(); run(async () => { await api(`/api/auth/${mode === 'login' ? 'login' : 'signup'}`, { method: 'POST', body: form }); nav('/'); }); };
+  const submitPassword = (e) => { e.preventDefault(); run(async () => { await api(`/api/auth/${mode === 'login' ? 'login' : 'signup'}`, { method: 'POST', body: form }); go(); }); };
   const requestCode = (e) => { e?.preventDefault(); run(async () => {
     const d = await api('/api/auth/otp/request', { method: 'POST', body: { email: form.email } });
     setOtp({ step: 'code', code: '', newAccount: d.new_account, cooldown: 60 });
     setNotice(`We emailed a 6-digit code to ${form.email.trim()}. It expires in ${d.expires_in_minutes} minutes.`);
   }); };
-  const verifyCode = (e) => { e.preventDefault(); run(async () => { await api('/api/auth/otp/verify', { method: 'POST', body: { email: form.email, code: otp.code, name: form.name } }); nav('/'); }); };
+  const verifyCode = (e) => { e.preventDefault(); run(async () => { await api('/api/auth/otp/verify', { method: 'POST', body: { email: form.email, code: otp.code, name: form.name } }); go(); }); };
   const forgot = (e) => { e.preventDefault(); run(async () => { await api('/api/auth/forgot', { method: 'POST', body: { email: form.email } }); setNotice(`If an account exists for ${form.email.trim()}, a reset link is on its way. Check your inbox (and spam).`); }); };
-  const reset = (e) => { e.preventDefault(); run(async () => { await api('/api/auth/reset', { method: 'POST', body: { token: resetToken, password: form.password } }); nav('/'); }); };
+  const reset = (e) => { e.preventDefault(); run(async () => { await api('/api/auth/reset', { method: 'POST', body: { token: resetToken, password: form.password } }); go(); }); };
 
   const hasSso = providers?.google || providers?.microsoft;
   const headings = {

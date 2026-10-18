@@ -95,6 +95,8 @@ October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/
 | CRM / HR integrations (Salesforce, Zoho CRM, Workday…) | ❌ build on API/webhooks | ✅ | ✅ Zoho suite |
 | Microsoft 365 add-ins | ❌ | ✅ | ✅ |
 | Zapier / Power Automate connectors | 🟡 via webhook + API | ✅ | ✅ |
+| MCP server — use it from Claude (claude.ai, Desktop, Code) | ✅ built in, OAuth | ❌ | ❌ |
+| AI assistant inside the app that performs actions | ✅ Claude with the same tools | 🟡 Acrobat AI Assistant (document Q&A) | 🟡 Zia (summaries) |
 | Payments collection during signing | ❌ | ✅ | ✅ 💰 |
 
 ## Pricing & deployment

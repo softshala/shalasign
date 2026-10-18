@@ -236,6 +236,31 @@ customers'. It is what Zoho and Adobe do behind the scenes.
 The older app-only `ONEDRIVE_*` variables still work as an operator-level
 fallback archive when a user has connected nothing.
 
+## Claude: MCP server and in-app assistant
+
+SignFlow has a built-in **MCP server** at `/mcp` (Streamable HTTP). Claude can
+list and inspect documents, send templates or new PDFs for signature, remind,
+void, correct a signer's email, move documents to folders and read your setup —
+acting as the connected user, with every action in the audit trail.
+
+- **claude.ai / Claude for Work**: Settings → Connectors → Add custom connector
+  → paste `https://YOUR-APP/mcp`. SignFlow's OAuth server (discovery at
+  `/.well-known/oauth-authorization-server`, dynamic registration, PKCE,
+  consent screen, refresh tokens) handles the sign-in. Users see and revoke
+  connected apps in *Settings → Claude & MCP*.
+- **Claude Code**: `claude mcp add --transport http signflow https://YOUR-APP/mcp --header "Authorization: Bearer sf_live_…"`
+- **Claude Desktop**: via `mcp-remote` with the same header (snippet in the app).
+
+The **in-app assistant** (✨ Ask, bottom right) runs Claude with the same tools
+on the server, as the logged-in user. Enable it by setting `ANTHROPIC_API_KEY`
+(optionally `ASSISTANT_MODEL`, default `claude-opus-5-5`). Destructive actions
+such as voiding require an explicit confirmation from the user.
+
+Tools: `list_documents`, `get_document`, `get_stats`, `list_templates`,
+`send_from_template`, `create_document`, `send_document`, `remind_signers`,
+`void_document`, `change_signer_email`, `list_folders`, `move_to_folder`,
+`get_my_setup`.
+
 ## API
 
 Create a key in *Settings → API & webhooks* and send it as
@@ -284,6 +309,10 @@ server/src/
   storage.js    – archive to the user's/workspace's OneDrive or Google Drive
   orgs.js       – workspaces, members, invitations, shared sending/storage
   scope.js      – who may see / edit which envelopes
+  tools.js      – the actions Claude can take (shared by MCP + assistant)
+  mcp.js        – MCP server (Streamable HTTP) at /mcp
+  oauth.js      – OAuth 2.1 server for MCP clients (claude.ai connectors)
+  assistant.js  – in-app Claude assistant (Anthropic SDK, tool loop)
   envelopes.js  – sender routes: upload, list, send, bulk, lifecycle
   signing.js    – signer routes: view, sign, decline, download
   templates.js  – reusable templates

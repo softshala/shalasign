@@ -14,6 +14,10 @@ import { registerEnvelopeRoutes } from './envelopes.js';
 import { registerSigningRoutes } from './signing.js';
 import { registerConnectionRoutes } from './connections.js';
 import { registerOrgRoutes } from './orgs.js';
+import { registerOAuthRoutes, userForAccessToken } from './oauth.js';
+import { registerMcpRoutes } from './mcp.js';
+import { registerAssistantRoutes, assistantEnabled } from './assistant.js';
+import { setOAuthLookup } from './auth.js';
 import { startScheduler } from './scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,6 +59,8 @@ app.get('/api/health', (_req, res) => {
     encryption_key_source: process.env.SIGNFLOW_SECRET ? 'env' : 'file-in-storage-dir',
     email_configured: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
     connect_providers: { microsoft: !!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET), google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) },
+    assistant_enabled: assistantEnabled(),
+    mcp_url: `${process.env.APP_URL || 'http://localhost:' + (process.env.PORT || 4000)}/mcp`,
     warnings: [
       ...(!persistent ? ['Storage is NOT a persistent disk: accounts, documents and sessions are erased on every deploy/restart. Attach a disk and set STORAGE_DIR to its mount path.'] : []),
       ...(process.env.RENDER && !process.env.SIGNFLOW_SECRET ? ['SIGNFLOW_SECRET is not set: the encryption key lives on the data disk, so disk backups can be decrypted by whoever holds them.'] : []),
@@ -73,6 +79,10 @@ registerEnvelopeRoutes(app);
 registerSigningRoutes(app);
 registerConnectionRoutes(app);
 registerOrgRoutes(app);
+setOAuthLookup(userForAccessToken);
+registerOAuthRoutes(app);
+registerMcpRoutes(app);
+registerAssistantRoutes(app);
 
 // JSON 404 for unknown API routes, and a JSON error handler.
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
@@ -87,7 +97,7 @@ app.use((err, _req, res, _next) => { // eslint-disable-line no-unused-vars
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist, { maxAge: '1h', index: false }));
-  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
+  app.get(/^(?!\/api\/|\/mcp$|\/oauth\/(authorize|token|register|revoke)|\/\.well-known\/).*/, (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 }
 
 const PORT = process.env.PORT || 4000;

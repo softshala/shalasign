@@ -143,6 +143,7 @@ export function registerEnvelopeRoutes(app) {
   });
 
   app.get('/api/envelopes/stats', requireAuth, (req, res) => {
+    const sc = envelopeScope(req.user); const W = sc.sql.replace(/e\./g, ''); const P = sc.params;
     const by = Object.fromEntries(db.prepare(`SELECT status, COUNT(*) n FROM envelopes WHERE ${W} GROUP BY status`).all(...P).map((r) => [r.status, r.n]));
     const month = db.prepare(`SELECT COUNT(*) n FROM envelopes WHERE ${W} AND status = 'completed' AND completed_at >= datetime('now', '-30 days')`).get(...P).n;
     const avg = db.prepare(`SELECT AVG((julianday(completed_at) - julianday(COALESCE(sent_at, created_at))) * 24) h FROM envelopes WHERE ${W} AND status = 'completed' AND completed_at IS NOT NULL`).get(...P).h;

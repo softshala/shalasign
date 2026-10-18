@@ -74,4 +74,6 @@ function housekeeping() {
   db.prepare(`DELETE FROM password_resets WHERE expires_at < datetime('now', '-1 day')`).run();
   db.prepare(`DELETE FROM sessions WHERE expires_at < datetime('now')`).run();
   db.prepare(`DELETE FROM webhook_deliveries WHERE created_at < datetime('now', '-30 days')`).run();
+  db.prepare(`DELETE FROM oauth_codes WHERE expires_at < datetime('now', '-1 day')`).run();
+  db.prepare(`DELETE FROM oauth_tokens WHERE refresh_expires_at < datetime('now', '-7 days') OR (revoked = 1 AND created_at < datetime('now', '-7 days'))`).run();
 }

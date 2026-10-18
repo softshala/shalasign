@@ -4,7 +4,7 @@ import Layout from '../components/Layout.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { api, fmtDate, copyText } from '../api.js';
 
-const TABS = [['connections', 'Connected accounts'], ['workspace', 'Workspace'], ['profile', 'Profile'], ['branding', 'Branding'], ['defaults', 'Sending defaults'], ['integrations', 'API & webhooks']];
+const TABS = [['connections', 'Connected accounts'], ['workspace', 'Workspace'], ['claude', 'Claude & MCP'], ['profile', 'Profile'], ['branding', 'Branding'], ['defaults', 'Sending defaults'], ['integrations', 'API & webhooks']];
 
 export default function Settings() {
   const [params, setParams] = useSearchParams();
@@ -23,6 +23,7 @@ export default function Settings() {
       <div className="tabs">{TABS.map(([k, v]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{v}</button>)}</div>
       {tab === 'connections' && <Connections />}
       {tab === 'workspace' && <Workspace />}
+      {tab === 'claude' && <ClaudeTab />}
       {['profile', 'branding', 'defaults', 'integrations'].includes(tab) && <Account tab={tab} />}
     </Layout>
   );
@@ -280,6 +281,61 @@ function Workspace() {
 
       {picker && <FolderPicker connectionId={picker.connectionId} provider={org.connections.find((c) => c.id === picker.connectionId)?.provider} listUrl={(id, parent) => `/api/org/connections/${id}/folders${parent ? `?parent=${encodeURIComponent(parent)}` : ''}`}
         onCancel={() => setPicker(null)} onPick={(f) => save({ storage_mode: 'shared', shared_storage_connection_id: picker.connectionId, shared_storage_root_id: f?.id || null, shared_storage_root_path: f?.path || f?.name || '' }, 'Shared folder saved').then(() => setPicker(null))} />}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Claude & MCP: connect Claude to SignFlow, in-app assistant status    */
+/* ------------------------------------------------------------------ */
+function ClaudeTab() {
+  const [status, setStatus] = useState(null);
+  const [grants, setGrants] = useState([]);
+  const [settings, setSettings] = useState(null);
+  const [newKey, setNewKey] = useState(null);
+  const toast = useToast();
+  const origin = window.location.origin;
+  const mcpUrl = `${origin}/mcp`;
+  const load = () => { api('/api/assistant/status').then(setStatus).catch(() => setStatus({ enabled: false, tools: [] })); api('/api/oauth/grants').then(setGrants).catch(() => {}); api('/api/settings').then(setSettings).catch(() => {}); };
+  useEffect(() => { load(); }, []);
+  const createKey = async () => { try { const k = await api('/api/settings/api-keys', { method: 'POST', body: { name: 'Claude Desktop / Code' } }); setNewKey(k); load(); } catch (e) { toast(e.message, { bad: true }); } };
+  const revoke = async (g) => { if (!confirm(`Disconnect ${g.name}?`)) return; await api(`/api/oauth/grants/${g.client_id}`, { method: 'DELETE' }); load(); toast('Disconnected'); };
+  const desktopConfig = JSON.stringify({ mcpServers: { signflow: { command: 'npx', args: ['-y', 'mcp-remote', mcpUrl, '--header', `Authorization: Bearer ${newKey?.key || 'sf_live_YOUR_KEY'}`] } } }, null, 2);
+  return (
+    <>
+      <div className="card tight" style={{ background: '#eef5ff', borderColor: '#c9dafb' }}>
+        <strong>Use SignFlow from Claude, or Claude from inside SignFlow.</strong>
+        <div className="muted small" style={{ marginTop: 4 }}>SignFlow has a built-in MCP server. Claude can list your documents, send templates, upload and send PDFs, remind and void — as you, with everything in the audit trail. The in-app assistant (✨ Ask, bottom right) uses the same tools.</div>
+      </div>
+      <div className="grid-2">
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Claude.ai / Claude for Work</h3>
+          <ol style={{ paddingLeft: 20, fontSize: 14, marginTop: 0 }}>
+            <li>In claude.ai open <em>Settings → Connectors → Add custom connector</em>.</li>
+            <li>Paste this URL:<div className="copy-link" style={{ marginTop: 4 }}>{mcpUrl}<button className="secondary" onClick={() => copyText(mcpUrl).then(() => toast('Copied'))}>Copy</button></div></li>
+            <li>Click Connect. You will be sent to SignFlow to log in and approve access, then back to Claude.</li>
+          </ol>
+          <h4 style={{ marginBottom: 6 }}>Connected apps</h4>
+          {grants.length === 0 && <p className="muted small" style={{ marginTop: 0 }}>Nothing connected yet.</p>}
+          {grants.map((g) => <div key={g.client_id} className="row spread" style={{ fontSize: 13, padding: '4px 0' }}><span>{g.name} <span className="muted">· last used {g.last_used ? fmtDate(g.last_used) : 'never'}</span></span><button className="ghost small" onClick={() => revoke(g)}>Disconnect</button></div>)}
+        </div>
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Claude Desktop / Claude Code</h3>
+          <p className="muted small" style={{ marginTop: 0 }}>These accept a token directly. Create an API key, then add the server:</p>
+          {newKey ? <div className="notice ok">Key created — copy it now, it is shown once:<div className="copy-link" style={{ marginTop: 6 }}>{newKey.key}<button className="secondary" onClick={() => copyText(newKey.key).then(() => toast('Copied'))}>Copy</button></div></div> : <button className="secondary small" onClick={createKey}>+ Create API key for Claude</button>}
+          <p className="small" style={{ marginBottom: 4 }}>Claude Code (terminal):</p>
+          <div className="copy-link">{`claude mcp add --transport http signflow ${mcpUrl} --header "Authorization: Bearer ${newKey?.key || 'sf_live_YOUR_KEY'}"`}<button className="secondary" onClick={() => copyText(`claude mcp add --transport http signflow ${mcpUrl} --header "Authorization: Bearer ${newKey?.key || 'sf_live_YOUR_KEY'}"`).then(() => toast('Copied'))}>Copy</button></div>
+          <p className="small" style={{ marginBottom: 4, marginTop: 10 }}>Claude Desktop (claude_desktop_config.json):</p>
+          <pre className="copy-link" style={{ display: 'block', whiteSpace: 'pre-wrap', margin: 0 }}>{desktopConfig}</pre>
+          <p className="muted small">Existing keys are managed under API &amp; webhooks.</p>
+        </div>
+      </div>
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>In-app assistant</h3>
+        {status?.enabled
+          ? <p className="muted" style={{ marginTop: 0 }}>Enabled (model {status.model}). Click <strong>✨ Ask</strong> at the bottom right of any page. Tools available: {status.tools.join(', ')}.</p>
+          : <p className="notice warn" style={{ marginTop: 0 }}>Not enabled on this server. The operator sets <code>ANTHROPIC_API_KEY</code> (and optionally <code>ASSISTANT_MODEL</code>) in the hosting environment to turn it on for everyone.</p>}
+      </div>
     </>
   );
 }

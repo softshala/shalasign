@@ -189,9 +189,18 @@ export function startSession(res, userId) {
   });
 }
 
+// Set by oauth.js at startup (avoids a circular import).
+let _oauthLookup = null;
+export const setOAuthLookup = (fn) => { _oauthLookup = fn; };
+
 export function currentUser(req) {
   // 1) API key: Authorization: Bearer sf_live_xxx
   const auth = req.headers.authorization || '';
+  if (auth.startsWith('Bearer sf_at_')) {
+    const row = _oauthLookup?.(auth.slice(7).trim());
+    if (row) { req.authVia = 'oauth'; return row; }
+    return null;
+  }
   if (auth.startsWith('Bearer sf_')) {
     const hash = crypto.createHash('sha256').update(auth.slice(7).trim()).digest('hex');
     const row = db.prepare(`SELECT u.*, k.id AS api_key_id FROM api_keys k JOIN users u ON u.id = k.user_id WHERE k.key_hash = ?`).get(hash);
