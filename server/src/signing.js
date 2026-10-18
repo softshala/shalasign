@@ -65,7 +65,8 @@ export function registerSigningRoutes(app) {
         return res.json({ locked: true, envelope: { title: env.title }, brand: publicBrand(env.user_id) });
       }
     }
-    const fields = db.prepare(`SELECT id, type, page, x, y, w, h, label, required, value FROM fields WHERE signer_id = ?`).all(signer.id);
+    const fields = db.prepare(`SELECT id, type, page, x, y, w, h, label, required, value, merge_key, cover FROM fields WHERE signer_id = ?`).all(signer.id)
+      .map((f) => ({ ...f, readonly: !!f.merge_key, cover: !!f.cover, merge_key: undefined }));
     const attachments = db.prepare(`SELECT id, label, original_name, stored_path FROM attachments WHERE signer_id = ?`).all(signer.id)
       .map((a) => ({ id: a.id, label: a.label, uploaded: !!a.stored_path, original_name: a.original_name }));
     const others = db.prepare(`SELECT name, order_index, status FROM signers WHERE envelope_id = ? ORDER BY order_index`).all(env.id);
@@ -144,7 +145,7 @@ export function registerSigningRoutes(app) {
     if (!isSignerTurn(env, signer)) return res.status(409).json({ error: 'It is not your turn to sign yet' });
     if (env.expires_at && env.expires_at <= nowSql()) return res.status(409).json({ error: 'The signing deadline for this document has passed' });
 
-    const { consent, signature_image, values = {}, attachments: uploads = [], typed_name } = req.body || {};
+    const { consent, signature_image, values = {}, attachments: uploads = [], typed_name, signature_fit = {} } = req.body || {};
     if (!consent) return res.status(400).json({ error: 'You must agree to sign electronically' });
     const myFields = db.prepare(`SELECT * FROM fields WHERE signer_id = ?`).all(signer.id);
     const needsSig = myFields.some((f) => f.type === 'signature' || f.type === 'initials');
@@ -152,8 +153,9 @@ export function registerSigningRoutes(app) {
       if (typeof signature_image !== 'string' || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(signature_image)) return res.status(400).json({ error: 'A signature image is required' });
       if (signature_image.length > 2 * 1024 * 1024) return res.status(400).json({ error: 'Signature image is too large' });
     }
-    // Required text fields must be filled.
+    // Required text fields must be filled (merge-bound fields keep the sender's value).
     for (const f of myFields) {
+      if (f.type === 'text' && f.merge_key) continue;
       if (f.type === 'text' && f.required && !String(values[f.id] ?? f.value ?? '').trim()) {
         return res.status(400).json({ error: `Please fill in the required field "${f.label || 'Text'}"` });
       }
@@ -186,11 +188,24 @@ export function registerSigningRoutes(app) {
     }
 
     const setValue = db.prepare(`UPDATE fields SET value = ? WHERE id = ?`);
+    const setMeta = db.prepare(`UPDATE fields SET value = ?, meta = ? WHERE id = ?`);
+    // Signature placement inside the field, chosen by the signer: {x,y,w,h} as fractions of the field.
+    const fitFor = (f) => {
+      const v = signature_fit && typeof signature_fit === 'object' ? signature_fit[f.id] : null;
+      if (!v) return null;
+      const n = (x, lo, hi) => (Number.isFinite(+x) ? Math.min(hi, Math.max(lo, +x)) : null);
+      const w = n(v.w, 0.15, 1), h = n(v.h, 0.15, 1);
+      if (w === null || h === null) return null;
+      const x = n(v.x, 0, 1 - w), y = n(v.y, 0, 1 - h);
+      if (x === null || y === null) return null;
+      return JSON.stringify({ fit: { x, y, w, h } });
+    };
     tx(() => {
       for (const f of myFields) {
         if (f.type === 'date') setValue.run(now.slice(0, 10), f.id);
-        else if (f.type === 'signature' || f.type === 'initials') setValue.run('signed', f.id);
+        else if (f.type === 'signature' || f.type === 'initials') setMeta.run('signed', fitFor(f), f.id);
         else if (f.type === 'checkbox') setValue.run(values[f.id] === 'true' || values[f.id] === true ? 'true' : 'false', f.id);
+        else if (f.merge_key) continue; // sender's merge value stays as-is
         else setValue.run(String(values[f.id] ?? f.value ?? '').slice(0, 500), f.id);
       }
       db.prepare(`UPDATE signers SET status='signed', signature_image=?, consent_at=?, signed_at=?, ip=?, user_agent=? WHERE id=?`)

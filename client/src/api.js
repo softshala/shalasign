@@ -48,6 +48,13 @@ export const daysLeft = (sql) => {
   return Math.ceil((d.getTime() - Date.now()) / 86400000);
 };
 
+/** Font size (px) so `text` fits on one line in a box of w×h px; mirrors the server's shrink-to-fit stamping. */
+export function fitFont(text, w, h, { max = 14, min = 7 } = {}) {
+  const byH = h * 0.62;
+  const byW = text ? (w - 6) / (String(text).length * 0.55) : byH;
+  return Math.max(min, Math.min(max, byH, byW));
+}
+
 export async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; }
   catch {

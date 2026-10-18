@@ -8,7 +8,7 @@ import { requireAuth } from './auth.js';
 import { sha256, validatePdf } from './pdf.js';
 import { writeEncrypted, readDecrypted } from './crypto.js';
 import { appUrl, mailEnabled, mailRouteFor } from './mailer.js';
-import { normalizeFields } from './fields.js';
+import { normalizeFields, applyMerge, mergeKeysOf, mergeText } from './fields.js';
 import { getEnvelope, getSigners, isSignerTurn, notifyPendingSigners, sendSignRequestTo, sealAndNotify, envelopePayload } from './complete.js';
 import { queueWebhook } from './webhooks.js';
 import { archiveEnvelope, archiveEnabledFor, archiveTargetLabel } from './storage.js';
@@ -70,7 +70,7 @@ function resolveFolder(req, folderId) {
 /** Write signers/fields/attachments for an envelope, returning signer rows. */
 function insertSigners(envId, signers, fields) {
   const insSigner = db.prepare(`INSERT INTO signers (id, envelope_id, name, email, order_index, token, private_message) VALUES (?, ?, ?, ?, ?, ?, ?)`);
-  const insField = db.prepare(`INSERT INTO fields (id, envelope_id, signer_id, type, page, x, y, w, h, label, required, value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insField = db.prepare(`INSERT INTO fields (id, envelope_id, signer_id, type, page, x, y, w, h, label, required, value, merge_key, cover) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const insAtt = db.prepare(`INSERT INTO attachments (id, envelope_id, signer_id, label) VALUES (?, ?, ?, ?)`);
   const out = [];
   signers.forEach((s, i) => {
@@ -78,7 +78,7 @@ function insertSigners(envId, signers, fields) {
     const token = nanoid(32);
     insSigner.run(sid, envId, s.name, s.email, i, token, s.private_message || '');
     for (const f of fields.filter((f) => f.signerIndex === i)) {
-      insField.run(nanoid(10), envId, sid, f.type, f.page, f.x, f.y, f.w, f.h, f.label, f.required, f.value);
+      insField.run(nanoid(10), envId, sid, f.type, f.page, f.x, f.y, f.w, f.h, f.label, f.required, f.value, f.merge_key || null, f.cover ? 1 : 0);
     }
     for (const label of s.attachments || []) insAtt.run(nanoid(10), envId, sid, label);
     out.push({ id: sid, name: s.name, email: s.email, token });
@@ -197,7 +197,7 @@ export function registerEnvelopeRoutes(app) {
     const owner = db.prepare(`SELECT name, email FROM users WHERE id = ?`).get(env.user_id);
     const route = await mailRouteFor(env.user_id);
     const signers = db.prepare(`SELECT id, name, email, order_index, status, token, consent_at, signed_at, declined_at, decline_reason, viewed_at, notified_at, reminders_sent, private_message, ip FROM signers WHERE envelope_id = ? ORDER BY order_index`).all(env.id);
-    const fields = db.prepare(`SELECT id, signer_id, type, page, x, y, w, h, label, required, value FROM fields WHERE envelope_id = ?`).all(env.id);
+    const fields = db.prepare(`SELECT id, signer_id, type, page, x, y, w, h, label, required, value, merge_key, cover, meta FROM fields WHERE envelope_id = ?`).all(env.id);
     const events = db.prepare(`SELECT type, actor, detail, ip, created_at FROM audit_events WHERE envelope_id = ? ORDER BY id`).all(env.id);
     const attachments = db.prepare(`SELECT id, signer_id, label, original_name, mime, uploaded_at FROM attachments WHERE envelope_id = ?`).all(env.id)
       .map((a) => ({ ...a, uploaded: !!a.uploaded_at }));
@@ -207,6 +207,7 @@ export function registerEnvelopeRoutes(app) {
       ...env, original_pdf: undefined, final_pdf: undefined, signer_pdf: undefined,
       folder_name: folder?.name || null,
       cc: parseJson(env.cc_json, []),
+      merge: parseJson(env.merge_json, null),
       draft: env.status === 'draft' ? parseJson(env.draft_json, null) : undefined,
       draft_json: undefined,
       signers: signers.map((s) => ({ ...s, signing_url: `${appUrl()}/sign/${s.token}`, your_turn: env.status === 'sent' && s.status === 'pending' && isSignerTurn(env, s) })),
@@ -305,16 +306,25 @@ export function registerEnvelopeRoutes(app) {
     const expiryDays = b.expiry_days === undefined || b.expiry_days === null || b.expiry_days === '' ? settings.default_expiry_days : clampInt(b.expiry_days, 0, 365, 0);
     const reminderDays = b.reminder_days === undefined || b.reminder_days === null || b.reminder_days === '' ? settings.default_reminder_days : clampInt(b.reminder_days, 0, 30, 0);
     const cc = cleanCc(b.cc);
-    const title = typeof b.title === 'string' && b.title.trim() ? b.title.trim().slice(0, 200) : env.title;
-    const message = typeof b.message === 'string' ? b.message.trim().slice(0, 2000) : env.message;
+    // Merge data typed by the sender (single send): { Company: "Acme", ... }
+    const typedMerge = b.merge && typeof b.merge === 'object' ? Object.fromEntries(Object.entries(b.merge).slice(0, 100).map(([k, v]) => [String(k).slice(0, 60), String(v ?? '').slice(0, 500)])) : {};
+    // {{Name}} / {{Email}} default to the first signer unless typed explicitly.
+    const mergeData = { Name: signers[0].name, Email: signers[0].email, ...typedMerge };
+    const merged = applyMerge(fields, mergeData);
+    if (merged.missing.length) return res.status(400).json({ error: `Missing merge data for: ${merged.missing.join(', ')}`, missing: merged.missing });
+    fields = merged.fields;
+    const title = mergeText(typeof b.title === 'string' && b.title.trim() ? b.title.trim().slice(0, 200) : env.title, mergeData);
+    const message = mergeText(typeof b.message === 'string' ? b.message.trim().slice(0, 2000) : env.message, mergeData);
 
     const created = tx(() => {
       db.prepare(`UPDATE envelopes SET title = ?, message = ?, folder_id = ?, access_code = ?, sequential = ?, status = 'sent', sent_at = datetime('now'),
-                  expires_at = ?, reminder_days = ?, cc_json = ?, draft_json = NULL WHERE id = ?`)
-        .run(title, message, folderId, code, sequential ? 1 : 0, expiryDays > 0 ? addDays(expiryDays) : null, reminderDays, JSON.stringify(cc), env.id);
+                  expires_at = ?, reminder_days = ?, cc_json = ?, draft_json = NULL, merge_json = ? WHERE id = ?`)
+        .run(title, message, folderId, code, sequential ? 1 : 0, expiryDays > 0 ? addDays(expiryDays) : null, reminderDays, JSON.stringify(cc), mergeKeysOf(fields).length ? JSON.stringify(mergeData) : null, env.id);
       return insertSigners(env.id, signers, fields);
     });
     audit(env.id, 'envelope.sent', actorOf(req.user), `Sent to ${signers.map((s) => `${s.name} <${s.email}>`).join(', ')}${sequential && signers.length > 1 ? ' (in order)' : ''}${expiryDays ? ` · expires in ${expiryDays} day(s)` : ''}${reminderDays ? ` · reminders every ${reminderDays} day(s)` : ''}${cc.length ? ` · CC ${cc.map((c) => c.email).join(', ')}` : ''}`, clientIp(req));
+    const usedKeys = mergeKeysOf(fields);
+    if (usedKeys.length) audit(env.id, 'merge.applied', actorOf(req.user), `Merge data: ${usedKeys.map((k) => `${k}="${(mergeData[Object.keys(mergeData).find((c) => c.toLowerCase() === k.toLowerCase())] ?? '').slice(0, 60)}"`).join(', ')}`, clientIp(req));
 
     await notifyPendingSigners(env.id);
     queueWebhook(req.user.id, 'envelope.sent', envelopePayload(env.id));
@@ -329,14 +339,31 @@ export function registerEnvelopeRoutes(app) {
     if (draft.status !== 'draft') return res.status(409).json({ error: `Envelope is ${draft.status}` });
     const settings = getSettings(req.user.id);
     const b = req.body || {};
-    const recipients = (Array.isArray(b.recipients) ? b.recipients : []).map((r) => ({ name: String(r?.name || '').trim().slice(0, 80), email: String(r?.email || '').trim().toLowerCase() })).filter((r) => r.name && validEmail(r.email));
-    if (!recipients.length) return res.status(400).json({ error: 'Add at least one recipient (name + email)' });
-    if (recipients.length > 500) return res.status(400).json({ error: 'Bulk send is limited to 500 recipients at a time' });
+    const rawRecipients = Array.isArray(b.recipients) ? b.recipients : [];
+    if (rawRecipients.length > 500) return res.status(400).json({ error: 'Bulk send is limited to 500 recipients at a time' });
     let fields, folderId;
     try {
       fields = normalizeFields(b.fields, 1, { requireSignature: true });
       folderId = resolveFolder(req, b.folder_id);
     } catch (e) { return res.status(400).json({ error: e.message }); }
+    // Validate every row BEFORE creating anything, so a bad spreadsheet never half-sends.
+    const problems = [];
+    const seen = new Set();
+    const recipients = rawRecipients.map((r, i) => {
+      const name = String(r?.name || '').trim().slice(0, 80);
+      const email = String(r?.email || '').trim().toLowerCase();
+      const data = r?.data && typeof r.data === 'object' ? Object.fromEntries(Object.entries(r.data).slice(0, 100).map(([k, v]) => [String(k).slice(0, 60), String(v ?? '').slice(0, 500)])) : {};
+      const row = i + 1;
+      if (!name) problems.push(`Row ${row}: missing name`);
+      if (!validEmail(email)) problems.push(`Row ${row}: invalid email "${email}"`);
+      else if (seen.has(email)) problems.push(`Row ${row}: duplicate email ${email}`);
+      seen.add(email);
+      const merged = applyMerge(fields, { Name: name, Email: email, ...data });
+      if (merged.missing.length) problems.push(`Row ${row} (${email || name}): missing ${merged.missing.join(', ')}`);
+      return { name, email, data, fields: merged.fields };
+    });
+    if (!recipients.length) return res.status(400).json({ error: 'Add at least one recipient (name + email)' });
+    if (problems.length) return res.status(400).json({ error: `Fix these before sending:\n${problems.slice(0, 15).join('\n')}${problems.length > 15 ? `\n…and ${problems.length - 15} more` : ''}`, problems });
     const code = b.access_code ? String(b.access_code).trim().slice(0, 40) : null;
     const attachments = (Array.isArray(b.attachments) ? b.attachments : []).map((a) => String(a).trim().slice(0, 60)).filter(Boolean);
     const expiryDays = b.expiry_days === undefined || b.expiry_days === null || b.expiry_days === '' ? settings.default_expiry_days : clampInt(b.expiry_days, 0, 365, 0);
@@ -350,14 +377,16 @@ export function registerEnvelopeRoutes(app) {
       const pdfPath = path.join(UPLOADS, `${eid}.pdf`);
       writeEncrypted(pdfPath, srcBytes);
       tx(() => {
-        db.prepare(`INSERT INTO envelopes (id, user_id, org_id, folder_id, access_code, title, message, status, original_pdf, sha256_original, sequential, sent_at, expires_at, reminder_days, page_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, 1, datetime('now'), ?, ?, ?)`)
-          .run(eid, req.user.id, req.user.org_id, folderId, code, `${draft.title} — ${r.name}`, draft.message || '', pdfPath, draft.sha256_original, expiryDays > 0 ? addDays(expiryDays) : null, reminderDays, draft.page_count);
-        const [s] = insertSigners(eid, [{ name: r.name, email: r.email, attachments, private_message: '' }], fields.map((f) => ({ ...f, signerIndex: 0 })));
+        const rowData = { Name: r.name, Email: r.email, ...r.data };
+        db.prepare(`INSERT INTO envelopes (id, user_id, org_id, folder_id, access_code, title, message, status, original_pdf, sha256_original, sequential, sent_at, expires_at, reminder_days, page_count, merge_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, 1, datetime('now'), ?, ?, ?, ?)`)
+          .run(eid, req.user.id, req.user.org_id, folderId, code, `${mergeText(draft.title, rowData)} — ${r.name}`, mergeText(draft.message || '', rowData), pdfPath, draft.sha256_original, expiryDays > 0 ? addDays(expiryDays) : null, reminderDays, draft.page_count, Object.keys(r.data).length ? JSON.stringify(r.data) : null);
+        const [s] = insertSigners(eid, [{ name: r.name, email: r.email, attachments, private_message: '' }], r.fields.map((f) => ({ ...f, signerIndex: 0 })));
         results.push({ name: r.name, email: r.email, signing_url: `${appUrl()}/sign/${s.token}` });
       });
       audit(eid, 'envelope.created', actorOf(req.user), `Bulk send copy for ${r.name} <${r.email}>`, clientIp(req));
       audit(eid, 'envelope.sent', actorOf(req.user), `Bulk send to ${r.name} <${r.email}>`, clientIp(req));
+      if (Object.keys(r.data).length) audit(eid, 'merge.applied', actorOf(req.user), `Merge data: ${Object.entries(r.data).slice(0, 12).map(([k, v]) => `${k}="${String(v).slice(0, 40)}"`).join(', ')}`, clientIp(req));
       envIds.push(eid);
     }
     // The draft template is consumed by the bulk send.

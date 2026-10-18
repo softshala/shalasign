@@ -298,6 +298,10 @@ for (const def of [
 ]) addColumn('envelopes', def);
 for (const def of ['declined_at TEXT', 'decline_reason TEXT', "private_message TEXT DEFAULT ''", 'viewed_at TEXT', 'notified_at TEXT', 'reminders_sent INTEGER NOT NULL DEFAULT 0']) addColumn('signers', def);
 addColumn('fields', 'required INTEGER NOT NULL DEFAULT 1');
+addColumn('fields', 'merge_key TEXT');                    // bound to a data column / typed merge value
+addColumn('fields', 'cover INTEGER NOT NULL DEFAULT 0');  // white-out the original {{tag}} text under the field
+addColumn('fields', 'meta TEXT');                         // JSON: e.g. signature fit {x,y,w,h} inside the field
+addColumn('envelopes', 'merge_json TEXT');                // the merge values used for this envelope (audit/record)
 addColumn('users', 'org_id TEXT');
 addColumn('users', "role TEXT NOT NULL DEFAULT 'member'");          // owner | admin | member (within the org)
 addColumn('envelopes', 'org_id TEXT');

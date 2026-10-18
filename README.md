@@ -11,15 +11,18 @@ for a feature-by-feature comparison and roadmap.
 
 **Sending** — drag-and-drop field editor (signature, initials, date, text,
 checkbox; required/optional, labels, pre-filled values; resize and move),
+**merge fields** filled from an Excel/CSV upload or typed values, **text tags**
+(`{{sig:1}}`, `{{date:1}}`, `{{Company}}`) detected in the document,
 up to 10 signers with sequential or parallel routing, private message per
 signer, CC recipients, required attachments per signer (Aadhaar, PAN, custom),
 access codes, folders, **templates**, **bulk send** (up to 500 recipients, CSV
 import), **draft autosave**, signing **deadlines** and **automatic reminders**.
 
 **Signing** — no account needed; works on phones (touch drawing, sticky action
-bar, "next step" guidance); draw, type or upload a signature and remember it on
-the device; decline with a reason; download the signed copy; branded with the
-sender's logo and colour.
+bar, "next step" guidance); draw, type or upload a signature (crop, rotate,
+paper-background removal), drag and resize it inside the signature box, and
+remember it on the device; decline with a reason; download the signed copy;
+branded with the sender's logo and colour.
 
 **Tracking** — dashboard with stats, search, status/folder filters; per-signer
 status (notified, opened, signed, declined); remind now, resend link, change a
@@ -120,6 +123,28 @@ because without it everything is erased on each deploy.
 Double-click **backup-mac.command** / **BACKUP-WINDOWS.bat** to save a dated
 zip to your Desktop. With the OneDrive archive configured, every completed
 document is also copied into your Microsoft 365 tenant automatically.
+
+## Merge fields and text tags
+
+Personalise each copy of a document without editing the PDF:
+
+- **Bind a field to data.** Place a text field, choose *Fill from data* and pick
+  a column or type a key such as `Company`. Tick *Hide the text underneath* when
+  the field sits over a placeholder in the document; the sealed PDF paints that
+  area white and stamps the value.
+- **Or type tags into the document** and click **Detect {{tags}}**. Supported:
+  `{{sig:1}}` / `{{signature:2}}`, `{{initials:1}}`, `{{date:1}}`,
+  `{{check:1}}`, `{{text:1:Employee ID}}`, and any other `{{Key}}` becomes a
+  merge field. Positions come from the PDF's own text, so they are exact.
+- **Bulk send with a spreadsheet.** Upload an Excel (.xlsx) or CSV with a header
+  row: `Name`, `Email` and one column per merge key. Columns are mapped
+  automatically (you can change the mapping), every row is validated (missing
+  name, invalid or duplicate email, empty required values) and the batch is
+  rejected server-side if any row is wrong, so a bad file never half-sends.
+  Preview the document as any recipient before sending. `{{Key}}` also works in
+  the title and message.
+- **Single sends** show a *Merge data* panel to type the values. Merge values
+  are read-only for signers and recorded in the audit trail (`merge.applied`).
 
 ## Templates, bulk send, reminders, deadlines
 
@@ -238,7 +263,8 @@ Create a key in *Settings → API & webhooks* and send it as
 | GET | `/api/sign/:token` · `/pdf` · `/download` | Signer's view / PDF / signed copy |
 | POST | `/api/sign/:token` · `/decline` | Submit consent + signature + values + attachments / decline |
 
-Fields: `{type: signature|initials|date|text|checkbox, page (0-based), x, y, w, h (normalized 0–1, top-left origin), signerIndex, label?, required?, prefill?}`.
+Fields: `{type: signature|initials|date|text|checkbox, page (0-based), x, y, w, h (normalized 0–1, top-left origin), signerIndex, label?, required?, prefill?, merge_key?, cover?}`.
+Send with `merge: {Key: value}`; bulk-send recipients as `{name, email, data: {Key: value}}`. Signers may pass `signature_fit: {fieldId: {x, y, w, h}}` (fractions of the field).
 
 **Webhooks** POST `{event, created_at, data}` with events `envelope.sent`,
 `envelope.completed`, `envelope.declined`, `envelope.voided`,

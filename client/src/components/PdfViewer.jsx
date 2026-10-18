@@ -21,7 +21,9 @@ export default function PdfViewer({ url, headers, maxWidth = 820, renderOverlay,
   const [pages, setPages] = useState([]); // [{index, baseW, baseH}]
   const [width, setWidth] = useState(maxWidth);
   const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
   const wrapRef = useRef(null);
+  const docRef = useRef(null);
   const canvasRefs = useRef({});
   const renderTasks = useRef({});
 
@@ -36,14 +38,17 @@ export default function PdfViewer({ url, headers, maxWidth = 820, renderOverlay,
     return () => ro.disconnect();
   }, [maxWidth]);
 
-  // Load document + page metadata.
+  // Load document + page metadata (one automatic retry on failure, then a Retry button).
   useEffect(() => {
     let cancelled = false;
     setDoc(null); setPages([]); setError('');
     (async () => {
       try {
-        const d = await pdfjs.getDocument({ url, httpHeaders: headers || {}, withCredentials: true }).promise;
-        if (cancelled) return;
+        let d;
+        try { d = await pdfjs.getDocument({ url, httpHeaders: headers || {}, withCredentials: true }).promise; }
+        catch (e1) { if (cancelled) return; await new Promise((r) => setTimeout(r, 800)); d = await pdfjs.getDocument({ url, httpHeaders: headers || {}, withCredentials: true }).promise; }
+        if (cancelled) { d.destroy?.(); return; }
+        docRef.current?.destroy?.(); docRef.current = d;
         const metas = [];
         for (let i = 1; i <= d.numPages; i++) {
           const page = await d.getPage(i);
@@ -58,7 +63,8 @@ export default function PdfViewer({ url, headers, maxWidth = 820, renderOverlay,
       }
     })();
     return () => { cancelled = true; };
-  }, [url, JSON.stringify(headers || {})]);
+  }, [url, JSON.stringify(headers || {}), attempt]);
+  useEffect(() => () => { docRef.current?.destroy?.(); docRef.current = null; }, []);
 
   // Render pages whenever the doc or width changes.
   useEffect(() => {
@@ -90,7 +96,7 @@ export default function PdfViewer({ url, headers, maxWidth = 820, renderOverlay,
 
   return (
     <div ref={wrapRef} style={{ width: '100%' }}>
-      {error && <p className="error">{error}</p>}
+      {error && <p className="error">{error} <button className="secondary small" onClick={() => setAttempt((a) => a + 1)}>Retry</button></p>}
       {pages.map((p) => {
         const h = (p.baseH / p.baseW) * width;
         return (

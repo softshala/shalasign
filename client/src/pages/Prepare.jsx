@@ -3,7 +3,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import PdfViewer from '../components/PdfViewer.jsx';
 import Layout from '../components/Layout.jsx';
 import { useToast } from '../components/Toast.jsx';
-import { api, copyText } from '../api.js';
+import { api, copyText, fitFont } from '../api.js';
+import DataImporter from '../components/DataImporter.jsx';
+import { scanTags } from '../lib/tags.js';
 
 const TOOLS = [
   { type: 'signature', label: '✍️ Signature', w: 0.24, h: 0.055 },
@@ -24,8 +26,12 @@ export default function Prepare() {
   const [title, setTitle] = useState('');
   const [bulk, setBulk] = useState(false);
   const [signers, setSigners] = useState([newSigner()]);
-  const [bulkRecipients, setBulkRecipients] = useState('');
+  const [bulkRows, setBulkRows] = useState([]);          // [{name,email,data}]
+  const [bulkColumns, setBulkColumns] = useState([]);    // merge columns from the file
   const [bulkAttachments, setBulkAttachments] = useState([]);
+  const [mergeData, setMergeData] = useState({});        // single send: typed merge values
+  const [previewIdx, setPreviewIdx] = useState(0);       // which recipient's data to preview
+  const [scanning, setScanning] = useState(false);
   const [activeSigner, setActiveSigner] = useState(0);
   const [tool, setTool] = useState('signature');
   const [fields, setFields] = useState([]);
@@ -56,7 +62,8 @@ export default function Prepare() {
           if (Array.isArray(d.fields)) setFields(d.fields.map((x) => ({ key: key(), ...x })));
           setOpts((o) => ({ ...o, sequential: d.sequential !== false, message: d.message || e.message || '', folder_id: d.folder_id || '', access_code: d.access_code || '',
             expiry_days: d.expiry_days ?? '', reminder_days: d.reminder_days ?? '', cc: d.cc || [] }));
-          if (d.bulk) { setBulk(true); setBulkRecipients(d.bulkRecipients || ''); setBulkAttachments(d.bulkAttachments || []); }
+          if (d.bulk) { setBulk(true); setBulkRows(d.bulkRows || []); setBulkColumns(d.bulkColumns || []); setBulkAttachments(d.bulkAttachments || []); }
+          if (d.mergeData) setMergeData(d.mergeData);
         } else if (e.message) setOpts((o) => ({ ...o, message: e.message }));
         loaded.current = true;
       } catch (err) { setError(err.message); }
@@ -64,7 +71,7 @@ export default function Prepare() {
   }, [id]);
 
   // ---- autosave (debounced) ----
-  const snapshot = useMemo(() => ({ signers, fields: fields.map(({ key: _k, ...f }) => f), ...opts, bulk, bulkRecipients, bulkAttachments }), [signers, fields, opts, bulk, bulkRecipients, bulkAttachments]);
+  const snapshot = useMemo(() => ({ signers, fields: fields.map(({ key: _k, ...f }) => f), ...opts, bulk, bulkRows, bulkColumns, bulkAttachments, mergeData }), [signers, fields, opts, bulk, bulkRows, bulkColumns, bulkAttachments, mergeData]);
   useEffect(() => {
     if (!loaded.current) return;
     dirty.current = true; setSaveState('Saving…');
@@ -75,15 +82,39 @@ export default function Prepare() {
     return () => clearTimeout(t);
   }, [snapshot, title]);
 
-  // ---- recipients for bulk ----
-  const parsedRecipients = useMemo(() => bulkRecipients.split('\n').map((line) => {
-    const parts = line.split(/[,\t;]/).map((p) => p.trim().replace(/^"|"$/g, ''));
-    if (parts.length >= 2 && parts[0] && parts[1]?.includes('@')) return { name: parts[0], email: parts[1] };
-    if (parts.length >= 2 && parts[1] && parts[0]?.includes('@')) return { name: parts[1], email: parts[0] };
-    if (parts.length === 1 && parts[0].includes('@')) return { name: parts[0].split('@')[0], email: parts[0] };
-    return null;
-  }).filter(Boolean), [bulkRecipients]);
-  const onCsv = (file) => { if (!file) return; const r = new FileReader(); r.onload = () => setBulkRecipients((prev) => (prev ? prev + '\n' : '') + String(r.result).replace(/^﻿/, '').split('\n').filter((l) => !/^\s*(name|email)\b/i.test(l)).join('\n')); r.readAsText(file); };
+  // ---- merge fields ----
+  const mergeKeys = useMemo(() => [...new Set(fields.map((f) => f.merge_key).filter(Boolean))], [fields]);
+  const requiredKeys = useMemo(() => [...new Set(fields.filter((f) => f.merge_key && f.required !== false).map((f) => f.merge_key))], [fields]);
+  const keyLookup = (data, key) => { const col = Object.keys(data || {}).find((c) => c.toLowerCase() === String(key).toLowerCase()); return col ? data[col] : ''; };
+  const isAutoKey = (k) => ['name', 'email'].includes(String(k).toLowerCase()); // always provided by the recipient / first signer
+  const previewRow = bulkRows[previewIdx];
+  const previewData = bulk ? { Name: previewRow?.name || '', Email: previewRow?.email || '', ...(previewRow?.data || {}) } : { Name: signers[0]?.name || '', Email: signers[0]?.email || '', ...mergeData };
+  const mergePreview = (f) => (f.merge_key ? (keyLookup(previewData, f.merge_key) || `{{${f.merge_key}}}`) : null);
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const validRows = bulkRows.filter((r) => r.name && EMAIL_RE.test(r.email));
+  const bulkProblems = useMemo(() => {
+    const out = []; const seen = new Set();
+    bulkRows.forEach((r, i) => {
+      if (!r.name || !EMAIL_RE.test(r.email)) out.push(`Row ${i + 1}: name or email invalid`);
+      else if (seen.has(r.email)) out.push(`Row ${i + 1}: duplicate ${r.email}`);
+      seen.add(r.email);
+      const miss = requiredKeys.filter((k) => !isAutoKey(k) && !keyLookup(r.data, k)); if (miss.length) out.push(`Row ${i + 1}: missing ${miss.join(', ')}`);
+    });
+    return out;
+  }, [bulkRows, requiredKeys]);
+  const detectTags = async () => {
+    setScanning(true); setError('');
+    try {
+      const r = await scanTags(`/api/envelopes/${id}/pdf`);
+      if (!r.fields.length) { toast('No {{tags}} found in this document'); return; }
+      const near = (a, b) => a.page === b.page && Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01;
+      const fresh = r.fields.filter((f) => !fields.some((g) => near(f, g))).map((f) => ({ key: key(), ...f, signerIndex: bulk ? 0 : Math.min(f.signerIndex, Math.max(0, signers.length - 1)) }));
+      setFields((fs) => [...fs, ...fresh]);
+      if (!bulk) { const sigCount = Math.max(...r.fields.map((f) => f.signerIndex + 1), 1); if (sigCount > signers.length) setSigners((ss) => [...ss, ...Array.from({ length: sigCount - ss.length }, newSigner)]); }
+      toast(`${fresh.length} field${fresh.length === 1 ? '' : 's'} placed from tags${r.keys.length ? ` · merge keys: ${r.keys.join(', ')}` : ''}`, { ms: 5000 });
+    } catch (e) { setError('Could not scan the document for tags: ' + e.message); }
+    finally { setScanning(false); }
+  };
 
   // ---- field placement / drag / resize ----
   const placeField = (page, { x, y }) => {
@@ -138,13 +169,16 @@ export default function Prepare() {
     setBusy(true);
     try {
       if (bulk) {
-        if (!parsedRecipients.length) return setError('Add at least one recipient (Name, email per line).');
-        const d = await api(`/api/envelopes/${id}/bulk-send`, { method: 'POST', body: { ...common, recipients: parsedRecipients, attachments: bulkAttachments, message: opts.message } });
+        if (!bulkRows.length) return setError('Upload an Excel/CSV file or paste recipients first.');
+        if (bulkProblems.length) return setError(`Fix the recipient data first: ${bulkProblems.slice(0, 6).join(' · ')}${bulkProblems.length > 6 ? ` · and ${bulkProblems.length - 6} more` : ''}`);
+        const d = await api(`/api/envelopes/${id}/bulk-send`, { method: 'POST', body: { ...common, recipients: bulkRows.map((r) => ({ name: r.name, email: r.email, data: r.data })), attachments: bulkAttachments, message: opts.message } });
         setLinks({ emailed: d.emailed, via: d.email_via, account: d.email_account, list: d.links, bulk: true, count: d.count });
       } else {
         const missing = signers.findIndex((s) => !s.name.trim() || !s.email.trim());
         if (missing >= 0) return setError(`Signer ${missing + 1} needs a name and an email.`);
-        const d = await api(`/api/envelopes/${id}/send`, { method: 'POST', body: { ...common, signers, sequential: opts.sequential, cc: opts.cc, title, message: opts.message } });
+        const missKeys = requiredKeys.filter((k) => !isAutoKey(k) && !keyLookup(mergeData, k));
+        if (missKeys.length) return setError(`Fill in the merge data for: ${missKeys.join(', ')}`);
+        const d = await api(`/api/envelopes/${id}/send`, { method: 'POST', body: { ...common, signers, sequential: opts.sequential, cc: opts.cc, title, message: opts.message, merge: mergeData } });
         setLinks({ emailed: d.emailed, via: d.email_via, account: d.email_account, list: d.links });
       }
     } catch (e) { setError(e.message); }
@@ -209,14 +243,14 @@ export default function Prepare() {
 
           {bulk ? (
             <div className="card">
-              <h4 style={{ marginTop: 0 }}>1 · Recipients</h4>
-              <p className="muted" style={{ marginTop: 0 }}>One per line as <strong>Name, email</strong>. Each person gets their own private copy to sign.</p>
-              <textarea style={{ width: '100%', minHeight: 120, fontFamily: 'Menlo, Consolas, monospace', fontSize: 12 }}
-                placeholder={'Asha Verma, asha@example.com\nRohit Jain, rohit@example.com'} value={bulkRecipients} onChange={(e) => setBulkRecipients(e.target.value)} />
-              <div className="row spread" style={{ marginTop: 6 }}>
-                <span className="muted">{parsedRecipients.length} valid recipient{parsedRecipients.length === 1 ? '' : 's'}</span>
-                <label className="btn secondary small">Import CSV<input type="file" accept=".csv,text/csv,text/plain" style={{ display: 'none' }} onChange={(e) => onCsv(e.target.files?.[0])} /></label>
-              </div>
+              <h4 style={{ marginTop: 0 }}>1 · Recipients & data</h4>
+              <p className="muted" style={{ marginTop: 0 }}>Each person gets their own private copy. Extra columns fill your <strong>merge fields</strong> (e.g. <code>{'{{Company}}'}</code>) per recipient.</p>
+              <DataImporter rows={bulkRows} columns={bulkColumns} requiredKeys={requiredKeys.filter((k) => !isAutoKey(k))} onChange={({ rows, columns }) => { setBulkRows(rows); setBulkColumns(columns); setPreviewIdx(0); }} />
+              {bulkRows.length > 1 && (
+                <label className="field" style={{ marginTop: 10 }}><span>Preview document as</span>
+                  <select value={previewIdx} onChange={(e) => setPreviewIdx(+e.target.value)}>{bulkRows.slice(0, 200).map((r, i) => <option key={i} value={i}>{r.name || r.email || `Row ${i + 1}`}</option>)}</select>
+                </label>
+              )}
               <AttachmentPicker labels={bulkAttachments} onChange={setBulkAttachments} />
             </div>
           ) : (
@@ -266,7 +300,20 @@ export default function Prepare() {
             {TOOLS.map((t) => (
               <button key={t.type} className={tool === t.type ? 'active' : ''} onClick={() => setTool(t.type)}>{t.label}</button>
             ))}
-            <p className="muted">Click the document to place the selected field. Drag to move, pull the corner to resize, press Delete to remove.</p>
+            <button className="secondary" style={{ background: '#fff4e0', color: '#7a4a00' }} disabled={scanning} onClick={detectTags} title="Finds {{sig:1}}, {{date:1}}, {{Company}}… typed in the document and places fields over them">{scanning ? 'Scanning…' : '🔍 Detect {{tags}} in document'}</button>
+            <p className="muted">Click the document to place the selected field. Drag to move, pull the corner to resize, press Delete to remove. Type <code>{'{{Company}}'}</code> in your document and click <em>Detect tags</em> to place merge fields automatically.</p>
+            {mergeKeys.length > 0 && !bulk && (
+              <div className="att-req" style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Merge data</div>
+                {mergeKeys.map((k) => (
+                  <label key={k} className="small" style={{ display: 'block', marginBottom: 6 }}>{'{{' + k + '}}'}{requiredKeys.includes(k) && !isAutoKey(k) ? ' *' : ''}
+                    <input style={{ width: '100%', marginTop: 2 }} placeholder={isAutoKey(k) ? `Defaults to signer 1's ${k.toLowerCase()}` : `Value for ${k}`} value={keyLookup(mergeData, k)} onChange={(e) => setMergeData({ ...mergeData, [k]: e.target.value })} />
+                  </label>
+                ))}
+                <div className="hint">These values are stamped into the document and recorded in the audit trail. Switch to <em>Bulk send</em> to fill them from a spreadsheet.</div>
+              </div>
+            )}
+            {mergeKeys.length > 0 && bulk && <p className="muted small">Merge fields: {mergeKeys.map((k) => <code key={k} style={{ marginRight: 6, color: isAutoKey(k) || bulkColumns.some((c) => c.toLowerCase() === k.toLowerCase()) ? 'var(--ok)' : 'var(--bad)' }}>{'{{' + k + '}}'}</code>)} — green = column found in your data ({'{{Name}}'} and {'{{Email}}'} come from the recipient).</p>}
             {selectedField && (
               <div className="att-req">
                 <div className="row spread"><strong style={{ fontSize: 13 }}>Selected: {selectedField.type}</strong><span className="muted small">page {selectedField.page + 1}</span></div>
@@ -275,7 +322,20 @@ export default function Prepare() {
                 )}
                 {selectedField.type === 'text' && (
                   <>
-                    <input placeholder="Pre-filled value (optional)" value={selectedField.prefill || ''} onChange={(e) => updateField(selected, { prefill: e.target.value })} style={{ width: '100%', marginTop: 6 }} />
+                    <label className="small" style={{ display: 'block', marginTop: 6 }}>Fill from data
+                      <select style={{ width: '100%', marginTop: 2 }} value={selectedField.merge_key ? '__key' : ''} onChange={(e) => { if (e.target.value === '') updateField(selected, { merge_key: undefined, cover: false }); else if (e.target.value === '__new') { const k = prompt('Merge key / column name, e.g. Company'); if (k?.trim()) updateField(selected, { merge_key: k.trim().replace(/[{}]/g, ''), label: selectedField.label || k.trim(), cover: true }); } else updateField(selected, { merge_key: e.target.value, label: selectedField.label || e.target.value, cover: true }); }}>
+                        <option value="">— signer types it —</option>
+                        {selectedField.merge_key && <option value="__key">{'{{' + selectedField.merge_key + '}}'}</option>}
+                        {bulkColumns.filter((c) => c !== selectedField.merge_key).map((c) => <option key={c} value={c}>{'{{' + c + '}}'} (from file)</option>)}
+                        {mergeKeys.filter((k) => k !== selectedField.merge_key && !bulkColumns.includes(k)).map((k) => <option key={k} value={k}>{'{{' + k + '}}'}</option>)}
+                        <option value="__new">+ new merge key…</option>
+                      </select>
+                    </label>
+                    {selectedField.merge_key ? (
+                      <label className="row small" style={{ marginTop: 6, gap: 6 }}><input type="checkbox" checked={!!selectedField.cover} onChange={(e) => updateField(selected, { cover: e.target.checked })} /> Hide the text underneath (white-out the {'{{tag}}'})</label>
+                    ) : (
+                      <input placeholder="Pre-filled value (optional)" value={selectedField.prefill || ''} onChange={(e) => updateField(selected, { prefill: e.target.value })} style={{ width: '100%', marginTop: 6 }} />
+                    )}
                     <label className="row small" style={{ marginTop: 6, gap: 6 }}><input type="checkbox" checked={selectedField.required !== false} onChange={(e) => updateField(selected, { required: e.target.checked })} /> Required</label>
                   </>
                 )}
@@ -319,7 +379,7 @@ export default function Prepare() {
               </div>
             )}
             {error && <p className="error">{error}</p>}
-            <button style={{ width: '100%', marginTop: 10 }} onClick={send} disabled={busy}>{busy ? 'Sending…' : bulk ? `Send to ${parsedRecipients.length} recipient${parsedRecipients.length === 1 ? '' : 's'} →` : 'Send for signature →'}</button>
+            <button style={{ width: '100%', marginTop: 10 }} onClick={send} disabled={busy}>{busy ? 'Sending…' : bulk ? `Send to ${validRows.length} recipient${validRows.length === 1 ? '' : 's'} →` : 'Send for signature →'}</button>
             <button className="secondary small" style={{ width: '100%', marginTop: 8 }} onClick={saveTemplate}>Save as template</button>
           </div>
         </div>
@@ -333,14 +393,16 @@ export default function Prepare() {
             renderOverlay={(pageIndex, size) => fields.filter((f) => f.page === pageIndex).map((f) => (
               <div
                 key={f.key}
-                className={`field-box s${f.signerIndex % 4} ${selected === f.key ? 'selected' : ''}`}
-                style={{ left: f.x * size.width, top: f.y * size.height, width: f.w * size.width, height: f.h * size.height }}
+                className={`field-box s${f.signerIndex % 4} ${selected === f.key ? 'selected' : ''} ${f.merge_key ? 'merge' : ''}`}
+                style={{ left: f.x * size.width, top: f.y * size.height, width: f.w * size.width, height: f.h * size.height, ...(f.merge_key ? { background: f.cover ? '#fff' : 'rgba(255,244,224,0.9)', borderStyle: 'dashed', borderColor: '#c77700', color: '#1b2430', fontSize: fitFont(mergePreview(f), f.w * size.width, f.h * size.height), whiteSpace: 'nowrap', justifyContent: 'flex-start', paddingLeft: 3 } : {}) }}
                 onPointerDown={(e) => startDrag(e, f.key, size, 'move')}
                 onClick={(e) => { e.stopPropagation(); setSelected(f.key); }}
                 title={`${f.type} · ${signers[f.signerIndex]?.name || signers[f.signerIndex]?.role || `Signer ${f.signerIndex + 1}`}`}
               >
-                {f.label && f.type !== 'signature' ? <span className="lbl">{f.label}</span> : null}
-                {f.type}{!bulk && signers.length > 1 ? ` · ${(signers[f.signerIndex]?.name || `S${f.signerIndex + 1}`).split(' ')[0]}` : ''}
+                {f.merge_key ? mergePreview(f) : (<>
+                  {f.label && f.type !== 'signature' ? <span className="lbl">{f.label}</span> : null}
+                  {f.type}{!bulk && signers.length > 1 ? ` · ${(signers[f.signerIndex]?.name || `S${f.signerIndex + 1}`).split(' ')[0]}` : ''}
+                </>)}
                 <button className="del" aria-label="Remove field" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeField(f.key); }}>×</button>
                 <span className="resize" onPointerDown={(e) => startDrag(e, f.key, size, 'resize')} />
               </div>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import PdfViewer from '../components/PdfViewer.jsx';
 import SignatureModal from '../components/SignatureModal.jsx';
-import { api, fmtDate, daysLeft } from '../api.js';
+import { api, fmtDate, daysLeft, fitFont } from '../api.js';
 
 export default function SignPage() {
   const { token } = useParams();
@@ -13,6 +13,21 @@ export default function SignPage() {
   const [consent, setConsent] = useState(false);
   const [values, setValues] = useState({});
   const [uploads, setUploads] = useState({});
+  const [fits, setFits] = useState({});          // fieldId -> {x,y,w,h} signature placement inside the field (fractions)
+  const [sigDims, setSigDims] = useState(null);  // natural size of the adopted signature image
+  const sigDrag = useRef(null);
+  useEffect(() => {
+    if (!signature) { setSigDims(null); return; }
+    const img = new Image(); img.onload = () => setSigDims({ w: img.naturalWidth, h: img.naturalHeight }); img.src = signature;
+    setFits({}); // a new signature starts centred again
+  }, [signature]);
+  // Default placement = the image fitted inside the box and centred (same as the server's default), so it can be dragged.
+  const defaultFit = (fw, fh) => {
+    if (!sigDims || !fw || !fh) return { x: 0, y: 0, w: 1, h: 1 };
+    const scale = Math.min(fw / sigDims.w, fh / sigDims.h);
+    const w = Math.min(1, (sigDims.w * scale) / fw), h = Math.min(1, (sigDims.h * scale) / fh);
+    return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
+  };
   const [done, setDone] = useState(null);
   const [code, setCode] = useState('');
   const [codeInput, setCodeInput] = useState('');
@@ -41,7 +56,7 @@ export default function SignPage() {
   };
 
   const sigFields = useMemo(() => (data?.fields || []).filter((f) => f.type === 'signature' || f.type === 'initials'), [data]);
-  const inputFields = useMemo(() => (data?.fields || []).filter((f) => f.type === 'text'), [data]);
+  const inputFields = useMemo(() => (data?.fields || []).filter((f) => f.type === 'text' && !f.readonly), [data]);
   const reqAttachments = data?.attachments || [];
   const missingText = inputFields.filter((f) => f.required && !(values[f.id] ?? '').trim());
   const allAttached = reqAttachments.every((a) => a.uploaded || uploads[a.id]);
@@ -70,7 +85,7 @@ export default function SignPage() {
   const submit = async () => {
     setError(''); setBusy(true);
     try {
-      const d = await api(`/api/sign/${token}`, { method: 'POST', headers: authHeaders, body: { consent, signature_image: signature, values, attachments: Object.entries(uploads).map(([id, u]) => ({ id, data: u.data, filename: u.filename })) } });
+      const d = await api(`/api/sign/${token}`, { method: 'POST', headers: authHeaders, body: { consent, signature_image: signature, values, signature_fit: fits, attachments: Object.entries(uploads).map(([id, u]) => ({ id, data: u.data, filename: u.filename })) } });
       setDone(d); window.scrollTo({ top: 0 });
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
@@ -162,13 +177,35 @@ export default function SignPage() {
               renderOverlay={(pageIndex, size) => data.fields.filter((f) => f.page === pageIndex).map((f) => {
                 const style = { left: f.x * size.width, top: f.y * size.height, width: f.w * size.width, height: f.h * size.height };
                 if (f.type === 'signature' || f.type === 'initials') {
+                  const fit = fits[f.id] || defaultFit(f.w * size.width, f.h * size.height);
+                  const startFit = (e, mode) => {
+                    if (!signature) return;
+                    e.stopPropagation(); e.preventDefault();
+                    const box = e.currentTarget.closest('.field-box').getBoundingClientRect();
+                    const target = e.currentTarget; target.setPointerCapture?.(e.pointerId);
+                    sigDrag.current = { moved: false, sx: e.clientX, sy: e.clientY, fit: { ...fit }, box, mode };
+                    const onMove = (ev) => {
+                      const d = sigDrag.current; if (!d) return;
+                      const dx = (ev.clientX - d.sx) / d.box.width, dy = (ev.clientY - d.sy) / d.box.height;
+                      if (Math.abs(ev.clientX - d.sx) + Math.abs(ev.clientY - d.sy) > 3) d.moved = true;
+                      if (d.mode === 'resize') { const w = Math.max(0.2, Math.min(1 - d.fit.x, d.fit.w + dx)); const h = Math.max(0.2, Math.min(1 - d.fit.y, d.fit.h + dy)); setFits((s) => ({ ...s, [f.id]: { ...d.fit, w, h } })); }
+                      else { const x = Math.max(0, Math.min(1 - d.fit.w, d.fit.x + dx)); const y = Math.max(0, Math.min(1 - d.fit.h, d.fit.y + dy)); setFits((s) => ({ ...s, [f.id]: { ...d.fit, x, y } })); }
+                    };
+                    const onUp = () => { target.removeEventListener('pointermove', onMove); target.removeEventListener('pointerup', onUp); const moved = sigDrag.current?.moved; sigDrag.current = null; if (!moved && mode === 'move') setShowModal(true); };
+                    target.addEventListener('pointermove', onMove); target.addEventListener('pointerup', onUp);
+                  };
                   return (
-                    <div key={f.id} ref={(el) => (fieldRefs.current[f.id] = el)} className={`field-box ${signature ? 'done' : 'todo'}`} style={style} onClick={() => setShowModal(true)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setShowModal(true)}>
-                      {signature ? <img src={signature} alt="signature" /> : `Tap to ${f.type === 'initials' ? 'initial' : 'sign'}`}
+                    <div key={f.id} ref={(el) => (fieldRefs.current[f.id] = el)} className={`field-box sig ${signature ? 'done' : 'todo'}`} style={{ ...style, overflow: 'visible', ...(f.cover ? { background: '#fff' } : {}) }} onClick={() => { if (!signature) setShowModal(true); }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setShowModal(true)} title={signature ? 'Drag to move, pull the corner to resize, tap to change' : ''}>
+                      {signature ? (
+                        <div style={{ position: 'absolute', left: `${fit.x * 100}%`, top: `${fit.y * 100}%`, width: `${fit.w * 100}%`, height: `${fit.h * 100}%`, cursor: 'move', touchAction: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', outline: fits[f.id] ? '1px dashed var(--ok)' : 'none' }} onPointerDown={(e) => startFit(e, 'move')}>
+                          <img src={signature} alt="signature" style={{ maxWidth: '100%', maxHeight: '100%', pointerEvents: 'none' }} draggable={false} />
+                          <span className="resize" style={{ background: 'var(--ok)', cursor: 'nwse-resize' }} onPointerDown={(e) => startFit(e, 'resize')} />
+                        </div>
+                      ) : `Tap to ${f.type === 'initials' ? 'initial' : 'sign'}`}
                     </div>
                   );
                 }
-                if (f.type === 'date') return <div key={f.id} className="field-box done" style={{ ...style, fontSize: Math.max(9, f.h * size.height * 0.5) }}>{new Date().toLocaleDateString()}</div>;
+                if (f.type === 'date') return <div key={f.id} className="field-box done" style={{ ...style, whiteSpace: 'nowrap', overflow: 'hidden', fontSize: fitFont(new Date().toLocaleDateString(), f.w * size.width, f.h * size.height), ...(f.cover ? { background: '#fff' } : {}) }}>{new Date().toLocaleDateString()}</div>;
                 if (f.type === 'checkbox') {
                   return (
                     <div key={f.id} className={`field-box ${values[f.id] === 'true' ? 'done' : 'todo'}`} style={{ ...style, fontSize: Math.max(10, f.h * size.height * 0.8) }} role="checkbox" aria-checked={values[f.id] === 'true'} tabIndex={0}
@@ -176,6 +213,9 @@ export default function SignPage() {
                       {values[f.id] === 'true' ? '✓' : ''}
                     </div>
                   );
+                }
+                if (f.readonly) {
+                  return <div key={f.id} className="field-box done" style={{ ...style, background: '#fff', border: '1px solid transparent', color: 'var(--ink)', justifyContent: 'flex-start', paddingLeft: 3, whiteSpace: 'nowrap', overflow: 'hidden', fontSize: fitFont(f.value, f.w * size.width, f.h * size.height) }} title="Filled in by the sender">{f.value}</div>;
                 }
                 return (
                   <input key={f.id} ref={(el) => (fieldRefs.current[f.id] = el)} className="field-box text-input" style={{ ...style, fontSize: Math.max(10, f.h * size.height * 0.55), borderColor: f.required && !(values[f.id] ?? '').trim() ? undefined : 'var(--ok)' }}
@@ -191,7 +231,8 @@ export default function SignPage() {
               {needsSig && (
                 <>
                   <button style={{ width: '100%', marginBottom: 10 }} className={signature ? 'secondary' : ''} onClick={() => setShowModal(true)}>{signature ? 'Change signature' : '✍️ Add your signature'}</button>
-                  {signature && <img src={signature} alt="your signature" className="sig-preview" style={{ marginBottom: 10, display: 'block' }} />}
+                  {signature && <img src={signature} alt="your signature" className="sig-preview" style={{ marginBottom: 6, display: 'block' }} />}
+                  {signature && <p className="muted small" style={{ marginTop: 0 }}>On the document you can drag your signature within its box and pull the corner to resize it.</p>}
                 </>
               )}
               {missingText.length > 0 && <p className="muted small">{missingText.length} required field{missingText.length === 1 ? '' : 's'} left to fill on the document.</p>}

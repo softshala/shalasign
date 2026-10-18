@@ -94,20 +94,27 @@ export async function sealEnvelope({ envelope, signers, fields, events, attachme
     const r = placeRect(page, f);
     const rotate = degrees(r.rotate);
 
+    // Merge fields placed over a {{tag}}: paint the tag area white first.
+    if (f.cover) page.drawRectangle({ x: r.x, y: r.y, width: r.w, height: r.h, color: rgb(1, 1, 1), borderWidth: 0 });
+
     if (f.type === 'signature' || f.type === 'initials') {
       const signer = signerById[f.signer_id];
       const dataUrl = decStr(signer?.signature_image);
       if (!dataUrl) continue;
+      // Signer-chosen placement inside the field (fractions of the field rect).
+      let fit = null;
+      try { fit = JSON.parse(f.meta || 'null')?.fit || null; } catch { /* ignore */ }
+      const sub = fit ? placeRect(page, { x: f.x + fit.x * f.w, y: f.y + fit.y * f.h, w: fit.w * f.w, h: fit.h * f.h }) : r;
       const base64 = dataUrl.split(',')[1];
       const imgBytes = Buffer.from(base64, 'base64');
       let img;
       try { img = dataUrl.startsWith('data:image/jpeg') ? await doc.embedJpg(imgBytes) : await doc.embedPng(imgBytes); }
       catch { continue; }
-      const scale = Math.min(r.dw / img.width, r.dh / img.height);
+      const scale = Math.min(sub.dw / img.width, sub.dh / img.height);
       const iw = img.width * scale, ih = img.height * scale;
-      // centre the image inside the field (in the displayed frame), then rotate with the page
-      const offX = (r.dw - iw) / 2, offY = (r.dh - ih) / 2;
-      const [ax, ay] = anchorWithOffset(r, offX, offY);
+      // centre the image inside the (sub-)field in the displayed frame, then rotate with the page
+      const offX = (sub.dw - iw) / 2, offY = (sub.dh - ih) / 2;
+      const [ax, ay] = anchorWithOffset(sub, offX, offY);
       page.drawImage(img, { x: ax, y: ay, width: iw, height: ih, rotate });
       const caption = safe(`Signed by ${signer.name} · ${signer.signed_at} UTC`, `Signed ${signer.signed_at} UTC`);
       const [cx, cy] = anchorWithOffset(r, 0, -8);
