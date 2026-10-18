@@ -44,7 +44,7 @@ export default function Join() {
 
   return (
     <Box>
-      <div className="auth-logo" style={{ color: 'var(--brand)', marginBottom: 12 }}>✒️ SignFlow</div>
+      <div className="auth-logo" style={{ color: 'var(--brand)', marginBottom: 12 }}>✒️ ShalaSign</div>
       <h2 style={{ margin: '0 0 6px' }}>Join {info.org_name}</h2>
       <p className="muted" style={{ marginTop: 0 }}>{info.inviter} invited <strong>{info.email}</strong> to join as {info.role === 'admin' ? 'an admin' : 'a member'}.</p>
       {me && me.email.toLowerCase() === info.email.toLowerCase() ? (

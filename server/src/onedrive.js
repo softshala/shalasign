@@ -4,7 +4,7 @@
 // and audit trail) is copied into a OneDrive or SharePoint document library.
 // Default layout (ONEDRIVE_PATH = "{sender_name}/{date}_{time}_{signer}"):
 //
-//   SignFlow/Shubham Sharma/2026-10-17_14-32-05_Asha Verma.pdf
+//   ShalaSign/Shubham Sharma/2026-10-17_14-32-05_Asha Verma.pdf
 //
 // ONEDRIVE_PATH tokens: {sender_name} {sender_email} {folder} {title} {id}
 //   {date} {time} (completion time in ONEDRIVE_TIMEZONE, default Asia/Kolkata)
@@ -25,7 +25,7 @@
 //   ONEDRIVE_SITE=softshala.sharepoint.com/sites/Contracts -> a SharePoint site library (per-sender
 //                                                            sub-folders, shared the same way)
 // Optional:
-//   ONEDRIVE_FOLDER=SignFlow                              root folder (default "SignFlow")
+//   ONEDRIVE_FOLDER=ShalaSign                              root folder (default "ShalaSign")
 //   ONEDRIVE_PATH={sender_name}/{date}_{time}_{signer}    file/folder naming pattern (see tokens above)
 //   ONEDRIVE_TIMEZONE=Asia/Kolkata                        timezone for {date}/{time}
 //   ONEDRIVE_SHARE_WITH_SENDER=0                          don't share each sender's top folder with them
@@ -41,7 +41,7 @@ const cfg = {
   secret: process.env.MS_CLIENT_SECRET,
   user: process.env.ONEDRIVE_USER,
   site: process.env.ONEDRIVE_SITE,
-  folder: (process.env.ONEDRIVE_FOLDER || 'SignFlow').replace(/^\/+|\/+$/g, '') || 'SignFlow',
+  folder: (process.env.ONEDRIVE_FOLDER || 'ShalaSign').replace(/^\/+|\/+$/g, '') || 'ShalaSign',
   shareWithSender: process.env.ONEDRIVE_SHARE_WITH_SENDER !== '0',
   tz: process.env.ONEDRIVE_TIMEZONE || 'Asia/Kolkata',
   pathPattern: null, // set below
@@ -171,7 +171,7 @@ async function shareFolderWithSender(driveId, folderPath, email) {
       roles: ['read'],
       requireSignIn: true,
       sendInvitation: false,
-      message: 'Your signed documents from SignFlow',
+      message: 'Your signed documents from ShalaSign',
     }),
   });
   db.prepare(`INSERT OR IGNORE INTO onedrive_shares (drive_id, path, email) VALUES (?, ?, ?)`).run(driveId, folderPath, email);

@@ -229,7 +229,7 @@ export default function Prepare() {
               ? (opts.sequential && !links.bulk && links.list.length > 1 ? 'The first signer has been emailed. Each next signer is emailed when their turn comes. Links are listed here as a backup:' : 'Each recipient has been emailed their own signing link. The links are also listed here as a backup:')
               : 'No email route is set up yet, so share these links directly (each one is private to that signer). To send automatically, connect your inbox in Settings → Connected accounts.'}
           </p>
-          {links.emailed && links.account && <p className="muted small">Emails were sent from <strong>{links.account}</strong>{links.via === 'platform' ? ' (the SignFlow sender; replies come to you)' : links.via === 'microsoft' ? ' via your Microsoft 365 inbox' : links.via === 'google' ? ' via your Gmail' : ''}.</p>}
+          {links.emailed && links.account && <p className="muted small">Emails were sent from <strong>{links.account}</strong>{links.via === 'platform' ? ' (the ShalaSign sender; replies come to you)' : links.via === 'microsoft' ? ' via your Microsoft 365 inbox' : links.via === 'google' ? ' via your Gmail' : ''}.</p>}
           {links.list.slice(0, 50).map((l) => (
             <div key={l.signing_url} style={{ marginBottom: 12 }}>
               <strong>{l.name}</strong> <span className="muted">({l.email})</span>

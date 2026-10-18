@@ -104,8 +104,9 @@ export function registerTemplateRoutes(app) {
       cc: tpl.options.cc || [],
       folder_id: req.body?.folder_id || null,
     };
-    db.prepare(`INSERT INTO envelopes (id, user_id, org_id, title, message, original_pdf, sha256_original, template_id, draft_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, req.user.id, req.user.org_id, title, draft.message, pdfPath, t.sha256, t.id, JSON.stringify(draft));
+    const extSys = String(req.body?.external_system || '').trim().toLowerCase().slice(0, 40) || null;
+    db.prepare(`INSERT INTO envelopes (id, user_id, org_id, title, message, original_pdf, sha256_original, template_id, draft_json, external_system, external_id, external_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, req.user.id, req.user.org_id, title, draft.message, pdfPath, t.sha256, t.id, JSON.stringify(draft), extSys, extSys ? String(req.body?.external_id || '').slice(0, 120) || null : null, extSys && /^https?:\/\//.test(String(req.body?.external_url || '')) ? String(req.body.external_url).slice(0, 500) : null);
     db.prepare(`UPDATE templates SET use_count = use_count + 1 WHERE id = ?`).run(t.id);
     audit(id, 'envelope.created', actorOf(req.user), `Created from template "${t.name}"`, clientIp(req));
     res.json({ id, title });

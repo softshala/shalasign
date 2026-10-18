@@ -46,7 +46,7 @@ export default function Setup() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      <div className="topbar"><span className="logo">✒️ {data.status.platform_name || 'SignFlow'}</span><span className="muted">First-run setup</span><span className="right"><button className="ghost small" onClick={finish}>Skip setup for now</button></span></div>
+      <div className="topbar"><span className="logo">✒️ {data.status.platform_name || 'ShalaSign'}</span><span className="muted">First-run setup</span><span className="right"><button className="ghost small" onClick={finish}>Skip setup for now</button></span></div>
       <div className="container" style={{ maxWidth: 820 }}>
         <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
           {steps.map((s, i) => <button key={s.title} className={`folder-chip ${i === step ? 'active' : ''}`} onClick={() => setStep(i)}>{i + 1}. {s.title}</button>)}

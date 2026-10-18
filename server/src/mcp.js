@@ -1,5 +1,5 @@
 // Remote MCP server (Streamable HTTP, stateless) at /mcp.
-// Auth: Bearer token — a SignFlow API key (sf_live_…) or an OAuth access token
+// Auth: Bearer token — a ShalaSign API key (sf_live_…) or an OAuth access token
 // (sf_at_…) issued by oauth.js. Unauthenticated requests get a 401 with the
 // resource-metadata pointer the MCP authorization spec expects, so claude.ai
 // connectors discover the OAuth flow automatically.
@@ -10,8 +10,8 @@ import { currentUser } from './auth.js';
 import { appUrl } from './mailer.js';
 
 function buildServer(ctx, user) {
-  const server = new McpServer({ name: 'signflow', version: '1.0.0' }, {
-    instructions: `SignFlow e-signature for ${user.name} <${user.email}>${user.org ? ` (workspace: ${user.org.name})` : ''}. Use the tools to list and inspect documents, send templates or new PDFs for signature, remind or void, and read status. Always ask the user before void_document. Links in results open in the SignFlow web app.`,
+  const server = new McpServer({ name: 'shalasign', version: '1.0.0' }, {
+    instructions: `ShalaSign e-signature for ${user.name} <${user.email}>${user.org ? ` (workspace: ${user.org.name})` : ''}. Use the tools to list and inspect documents, send templates or new PDFs for signature, remind or void, and read status. Always ask the user before void_document. Links in results open in the ShalaSign web app.`,
   });
   for (const t of TOOLS) {
     server.registerTool(t.name, { title: t.name.replace(/_/g, ' '), description: t.description, inputSchema: t.schema }, async (args) => {
@@ -28,8 +28,8 @@ function buildServer(ctx, user) {
 
 export function registerMcpRoutes(app) {
   const unauthorized = (res) => {
-    res.set('WWW-Authenticate', `Bearer realm="SignFlow", resource_metadata="${appUrl()}/.well-known/oauth-protected-resource"`);
-    res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized: send a SignFlow API key or OAuth token as Bearer' }, id: null });
+    res.set('WWW-Authenticate', `Bearer realm="ShalaSign", resource_metadata="${appUrl()}/.well-known/oauth-protected-resource"`);
+    res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized: send a ShalaSign API key or OAuth token as Bearer' }, id: null });
   };
 
   app.post('/mcp', async (req, res) => {

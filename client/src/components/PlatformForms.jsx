@@ -36,7 +36,7 @@ export function EmailForm({ data, onSaved, compact = false }) {
         <label className="field"><span>Username</span><input value={form.smtp_user} onChange={(e) => setForm({ ...form, smtp_user: e.target.value })} placeholder="mailbox or login" autoComplete="off" /></label>
         <label className="field"><span>Password / API key</span><input type="password" value={form.smtp_pass} onChange={(e) => setForm({ ...form, smtp_pass: e.target.value })} onFocus={() => form.smtp_pass === MASK && setForm({ ...form, smtp_pass: '' })} autoComplete="new-password" /></label>
       </div>
-      <label className="field"><span>From address</span><input value={form.from_email} onChange={(e) => setForm({ ...form, from_email: e.target.value })} placeholder={`${data.values.platform_name || 'SignFlow'} <noreply@yourcompany.com>`} /><div className="hint">Shown as the sender. Most providers require it to be a verified address or domain.</div></label>
+      <label className="field"><span>From address</span><input value={form.from_email} onChange={(e) => setForm({ ...form, from_email: e.target.value })} placeholder={`${data.values.platform_name || 'ShalaSign'} <noreply@yourcompany.com>`} /><div className="hint">Shown as the sender. Most providers require it to be a verified address or domain.</div></label>
       <div className="row">
         <button disabled={!!busy || !form.smtp_host || !form.smtp_user || !form.smtp_pass} onClick={() => save(false)}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
         <button className="secondary" disabled={!!busy || !form.smtp_host || !form.smtp_user || !form.smtp_pass} onClick={() => save(true)}>{busy === 'test' ? 'Sending…' : 'Save & send me a test email'}</button>
@@ -96,7 +96,7 @@ export function GeneralForm({ data, onSaved }) {
   const save = async () => { setBusy(true); try { await api('/api/platform', { method: 'PUT', body: form }); toast('Saved'); onSaved?.(); } catch (e) { toast(e.message, { bad: true }); } finally { setBusy(false); } };
   return (
     <div>
-      <label className="field"><span>Platform name</span><input value={form.platform_name} onChange={(e) => setForm({ ...form, platform_name: e.target.value })} placeholder="SignFlow" /><div className="hint">Shown in emails and on the login page.</div></label>
+      <label className="field"><span>Platform name</span><input value={form.platform_name} onChange={(e) => setForm({ ...form, platform_name: e.target.value })} placeholder="ShalaSign" /><div className="hint">Shown in emails and on the login page.</div></label>
       <label className="field"><span>Public URL</span><input value={form.public_url} onChange={(e) => setForm({ ...form, public_url: e.target.value })} placeholder={data.status.public_url} /><div className="hint">Detected automatically as <code>{data.status.public_url}</code> ({data.status.url_source}). Set it only if that is wrong, e.g. behind a custom domain. Used in emails and OAuth redirects.</div></label>
       <div className="grid-2" style={{ gap: 10 }}>
         <label className="field"><span>Reverse proxy</span><select value={form.trust_proxy} onChange={(e) => setForm({ ...form, trust_proxy: e.target.value })}><option value="auto">Auto-detect (recommended)</option><option value="on">Always behind a proxy</option><option value="off">Never</option></select><div className="hint">Affects how client IPs in the audit trail and HTTPS are detected.</div></label>

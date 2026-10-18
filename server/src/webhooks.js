@@ -45,10 +45,10 @@ async function deliver(d) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'SignFlow-Webhook/1.0',
-        'X-SignFlow-Event': d.event,
-        'X-SignFlow-Delivery': String(d.id),
-        ...(sig ? { 'X-SignFlow-Signature': `sha256=${sig}` } : {}),
+        'User-Agent': 'ShalaSign-Webhook/1.0',
+        'X-ShalaSign-Event': d.event,
+        'X-ShalaSign-Delivery': String(d.id),
+        ...(sig ? { 'X-ShalaSign-Signature': `sha256=${sig}` } : {}),
       },
       body: d.payload,
       signal: ctrl.signal,
@@ -73,14 +73,14 @@ async function deliver(d) {
 export async function testWebhook(userId) {
   const s = getSettings(userId);
   if (!s.webhook_url) return { ok: false, error: 'No webhook URL configured' };
-  const body = JSON.stringify({ event: 'ping', created_at: new Date().toISOString(), data: { message: 'SignFlow webhook test' } });
+  const body = JSON.stringify({ event: 'ping', created_at: new Date().toISOString(), data: { message: 'ShalaSign webhook test' } });
   const sig = s.webhook_secret ? crypto.createHmac('sha256', s.webhook_secret).update(body).digest('hex') : '';
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 10_000);
     const r = await fetch(s.webhook_url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-SignFlow-Event': 'ping', ...(sig ? { 'X-SignFlow-Signature': `sha256=${sig}` } : {}) },
+      headers: { 'Content-Type': 'application/json', 'X-ShalaSign-Event': 'ping', ...(sig ? { 'X-ShalaSign-Signature': `sha256=${sig}` } : {}) },
       body, signal: ctrl.signal,
     });
     clearTimeout(t);

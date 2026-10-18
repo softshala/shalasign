@@ -11,12 +11,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // WHERE YOUR DATA LIVES — this is deliberately OUTSIDE the app folder so that
 // replacing/updating the app never touches your accounts, documents or history.
 //   1. STORAGE_DIR env var (hosting sets this to a persistent disk), else
-//   2. ~/SignFlowData in the user's home folder (survives app updates), else
+//   2. ~/ShalaSignData in the user's home folder (survives app updates), else
 //   3. the app's own data/ folder (last-resort fallback).
 function resolveStorageDir() {
   if (process.env.STORAGE_DIR) return process.env.STORAGE_DIR;
   try {
-    const home = path.join(os.homedir(), 'SignFlowData');
+    // Installations created under the old brand keep their folder.
+    const legacy = path.join(os.homedir(), 'SignFlowData');
+    if (fs.existsSync(path.join(legacy, 'signflow.db'))) return legacy;
+    const home = path.join(os.homedir(), 'ShalaSignData');
     fs.mkdirSync(home, { recursive: true });
     return home;
   } catch {
@@ -28,7 +31,7 @@ fs.mkdirSync(STORAGE_DIR, { recursive: true });
 const db = new DatabaseSync(path.join(STORAGE_DIR, 'signflow.db'));
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = OFF'); // we manage integrity in code; keeps migrations simple
-console.log(`SignFlow data folder: ${STORAGE_DIR}`);
+console.log(`ShalaSign data folder: ${STORAGE_DIR}`);
 
 // Run several statements as one all-or-nothing unit.
 export function tx(fn) {
@@ -296,7 +299,7 @@ CREATE TABLE IF NOT EXISTS oauth_codes (
   user_id TEXT NOT NULL,
   redirect_uri TEXT NOT NULL,
   code_challenge TEXT NOT NULL,
-  scope TEXT NOT NULL DEFAULT 'signflow',
+  scope TEXT NOT NULL DEFAULT 'shalasign',
   resource TEXT DEFAULT '',
   used INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -306,7 +309,7 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  scope TEXT NOT NULL DEFAULT 'signflow',
+  scope TEXT NOT NULL DEFAULT 'shalasign',
   access_hash TEXT NOT NULL UNIQUE,
   access_expires_at TEXT NOT NULL,
   refresh_hash TEXT NOT NULL UNIQUE,
@@ -347,6 +350,10 @@ addColumn('fields', 'cover INTEGER NOT NULL DEFAULT 0');  // white-out the origi
 addColumn('fields', 'meta TEXT');                         // JSON: e.g. signature fit {x,y,w,h} inside the field
 addColumn('envelopes', 'merge_json TEXT');                // the merge values used for this envelope (audit/record)
 addColumn('envelopes', 'summary_json TEXT');              // AI "What am I signing?" briefing for signers
+addColumn('envelopes', 'external_system TEXT');           // e.g. "salesforce" — set by integrations
+addColumn('envelopes', 'external_id TEXT');               // the record id on that system
+addColumn('envelopes', 'external_url TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS idx_env_external ON envelopes(external_system, external_id)');
 addColumn('envelopes', 'document_text TEXT');             // extracted text (for the briefing; kept short)
 addColumn('users', 'org_id TEXT');
 addColumn('users', "role TEXT NOT NULL DEFAULT 'member'");          // owner | admin | member (within the org)

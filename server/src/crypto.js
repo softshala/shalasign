@@ -1,7 +1,7 @@
 // Encryption at rest for sensitive data (PDFs, signatures, ID attachments).
 //
 // Uses AES-256-GCM. The key comes from, in order:
-//   1. SIGNFLOW_SECRET env var (recommended for hosting — a secret NOT stored
+//   1. SHALASIGN_SECRET env var (SIGNFLOW_SECRET still accepted; recommended for hosting — a secret NOT stored
 //      next to the data, so someone who dumps the disk still can't decrypt).
 //   2. A generated key file secret.key inside STORAGE_DIR (local default — zero
 //      config; travels with your backup so restores work).
@@ -13,13 +13,16 @@ import fs from 'fs';
 import path from 'path';
 import { STORAGE_DIR } from './db.js';
 
+/** Host-provided encryption secret. SHALASIGN_SECRET is the new name; SIGNFLOW_SECRET keeps working for existing deployments. */
+export const ENV_SECRET = process.env.SHALASIGN_SECRET || process.env.SIGNFLOW_SECRET || '';
+
 const MAGIC = Buffer.from('SFENC1');
 const STR_PREFIX = 'enc1:';
 
 function loadKey() {
-  if (process.env.SIGNFLOW_SECRET) {
+  if (ENV_SECRET) {
     // Derive a 32-byte key from the provided secret.
-    return crypto.scryptSync(process.env.SIGNFLOW_SECRET, 'signflow-at-rest-v1', 32);
+    return crypto.scryptSync(ENV_SECRET, 'signflow-at-rest-v1', 32);
   }
   const keyPath = path.join(STORAGE_DIR, 'secret.key');
   try {
@@ -69,4 +72,4 @@ export function decStr(s) {
   return decryptBuffer(Buffer.from(s.slice(STR_PREFIX.length), 'base64')).toString('utf8');
 }
 
-export const encryptionActive = !!process.env.SIGNFLOW_SECRET;
+export const encryptionActive = !!ENV_SECRET;

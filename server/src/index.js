@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { encryptionActive } from './crypto.js';
 import cookieParser from 'cookie-parser';
 import fs from 'fs';
 import path from 'path';
@@ -66,7 +67,7 @@ app.get('/api/health', (_req, res) => {
     hosted_on_render: !!process.env.RENDER,
     storage_dir_from_env: !!process.env.STORAGE_DIR,
     storage_is_persistent_disk: persistent,
-    encryption_key_source: process.env.SIGNFLOW_SECRET ? 'env' : 'file-in-storage-dir',
+    encryption_key_source: encryptionActive ? 'env' : 'file-in-storage-dir',
     email_configured: setupStatus().email,
     connect_providers: { microsoft: setupStatus().microsoft, google: setupStatus().google },
     assistant_platform_key_shared: setupStatus().assistant_shared,
@@ -75,7 +76,7 @@ app.get('/api/health', (_req, res) => {
     mcp_url: `${publicUrl()}/mcp`,
     warnings: [
       ...(!persistent ? ['Storage is NOT a persistent disk: accounts, documents and sessions are erased on every deploy/restart. Attach a disk and set STORAGE_DIR to its mount path.'] : []),
-      ...(process.env.RENDER && !process.env.SIGNFLOW_SECRET ? ['SIGNFLOW_SECRET is not set: the encryption key lives on the data disk, so disk backups can be decrypted by whoever holds them.'] : []),
+      ...(process.env.RENDER && !encryptionActive ? ['SHALASIGN_SECRET is not set: the encryption key lives on the data disk, so disk backups can be decrypted by whoever holds them.'] : []),
       ...(!setupStatus().email ? ['Platform email is not configured (operator console → Email): users must connect their own inbox to send; login codes and password resets are off.'] : []),
     ],
   });
@@ -116,12 +117,12 @@ if (fs.existsSync(clientDist)) {
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`SignFlow server on http://localhost:${PORT}`);
+  console.log(`ShalaSign server on http://localhost:${PORT}`);
   if ((process.env.RENDER || process.env.STORAGE_DIR) && !storageIsMount()) {
     console.warn('\n!!! WARNING: STORAGE_DIR is not on a persistent disk. All accounts, documents and sessions');
     console.warn(`!!! will be ERASED on the next deploy or restart. Storage dir: ${STORAGE_DIR}`);
     console.warn('!!! Fix: attach a disk to the service and set STORAGE_DIR to its mount path (see render.yaml).\n');
   }
-  if (process.env.RENDER && !process.env.SIGNFLOW_SECRET) console.warn('!!! WARNING: SIGNFLOW_SECRET is not set; the encryption key is stored next to the data.');
+  if (process.env.RENDER && !encryptionActive) console.warn('!!! WARNING: SHALASIGN_SECRET is not set; the encryption key is stored next to the data.');
   if (!process.env.DISABLE_SCHEDULER) startScheduler();
 });

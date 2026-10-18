@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>ShalaSign User</label><hasActivationRequired>false</hasActivationRequired>
+    <applicationVisibilities><application>ShalaSign</application><visible>true</visible></applicationVisibilities>
+    <classAccesses><apexClass>ShalaSignClient</apexClass><enabled>true</enabled></classAccesses>
+    <classAccesses><apexClass>ShalaSignService</apexClass><enabled>true</enabled></classAccesses>
+    <classAccesses><apexClass>ShalaSignRecordContext</apexClass><enabled>true</enabled></classAccesses>
+    <classAccesses><apexClass>ShalaSignSendController</apexClass><enabled>true</enabled></classAccesses>
+    <classAccesses><apexClass>ShalaSignSendInvocable</apexClass><enabled>true</enabled></classAccesses>
+    <classAccesses><apexClass>ShalaSignSyncQueueable</apexClass><enabled>true</enabled></classAccesses>
+    <classAccesses><apexClass>ShalaSignSyncSchedulable</apexClass><enabled>true</enabled></classAccesses>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Status__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Record_Id__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Related_Object__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Signer_Summary__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Signers__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Sent_At__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Completed_At__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Expires_At__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Open_Url__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Template_Name__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Last_Synced__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Signed_File_Id__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Error__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Account__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Contact__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <fieldPermissions><field>ShalaSign_Envelope__c.Opportunity__c</field><editable>true</editable><readable>true</readable></fieldPermissions>
+    <objectPermissions><allowCreate>true</allowCreate><allowDelete>false</allowDelete><allowEdit>true</allowEdit><allowRead>true</allowRead><modifyAllRecords>false</modifyAllRecords><object>ShalaSign_Envelope__c</object><viewAllRecords>false</viewAllRecords></objectPermissions>
+    <tabSettings><tab>ShalaSign_Envelope__c</tab><visibility>Visible</visibility></tabSettings>
+</PermissionSet>

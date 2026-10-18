@@ -2,7 +2,7 @@
 # In Render: New + → Blueprint → connect this repository → Apply.
 services:
   - type: web
-    name: signflow
+    name: shalasign
     runtime: node
     plan: starter            # has a persistent disk; change to "free" for a throwaway demo (data is wiped on restarts!)
     buildCommand: cd client && npm install && npm run build && cd ../server && npm install
@@ -18,7 +18,7 @@ services:
         value: 1
       - key: STORAGE_DIR
         value: /opt/render/project/src/server/data-disk
-      - key: SIGNFLOW_SECRET
+      - key: SHALASIGN_SECRET
         generateValue: true     # Render generates a strong encryption key and keeps it secret (not in any file)
       # Set these in the Render dashboard (Environment tab) — do not commit passwords:
       # APP_URL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL

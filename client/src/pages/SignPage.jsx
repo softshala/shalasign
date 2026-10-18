@@ -98,7 +98,7 @@ export default function SignPage() {
   };
 
   const brand = data?.brand || {};
-  const Brand = () => brand.logo_url ? <img src={brand.logo_url} alt={brand.company || 'Logo'} style={{ maxHeight: 30, maxWidth: 140 }} /> : <span className="logo">✒️ {brand.company || 'SignFlow'}</span>;
+  const Brand = () => brand.logo_url ? <img src={brand.logo_url} alt={brand.company || 'Logo'} style={{ maxHeight: 30, maxWidth: 140 }} /> : <span className="logo">✒️ {brand.company || 'ShalaSign'}</span>;
 
   if (error && !data) return <Centered><h2>⚠️ {error}</h2><p className="muted">If you think this is a mistake, contact the person who sent you the document.</p></Centered>;
   if (!data) return <Centered><p className="muted">Loading…</p></Centered>;
@@ -269,7 +269,7 @@ export default function SignPage() {
               )}
             </div>
             {data.signers?.length > 1 && <div className="card tight"><SignerList signers={data.signers} me={data.signer.order_index} sequential={data.envelope.sequential} /></div>}
-            <p className="muted small" style={{ textAlign: 'center' }}>Secured by SignFlow · every step is recorded in a tamper-evident audit trail.</p>
+            <p className="muted small" style={{ textAlign: 'center' }}>Secured by ShalaSign · every step is recorded in a tamper-evident audit trail.</p>
           </div>
         </div>
       </div>

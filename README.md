@@ -1,4 +1,4 @@
-# SignFlow — a self-hosted e-signature platform
+# ShalaSign — a self-hosted e-signature platform
 
 Upload a PDF, place signature fields, send signing links, capture drawn, typed
 or uploaded signatures with consent, and seal the completed document with
@@ -88,7 +88,7 @@ variables are a fallback for container deployments and for hosting concerns:
 |---|---|
 | Public URL (used in emails and SSO redirects) | `APP_URL` |
 | Email (signing links, reminders, completion copies) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `FROM_EMAIL` |
-| Storage & encryption | `STORAGE_DIR` (persistent disk), `SIGNFLOW_SECRET` (AES key; otherwise a `secret.key` file is generated) |
+| Storage & encryption | `STORAGE_DIR` (persistent disk), `SHALASIGN_SECRET` (AES key; `SIGNFLOW_SECRET` still accepted; otherwise a `secret.key` file is generated) |
 | HTTPS deployments | `COOKIE_SECURE=1`; behind a proxy `TRUST_PROXY=1` (automatic on Render) |
 | Google sign-in | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
 | Microsoft sign-in | `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT` |
@@ -103,7 +103,7 @@ API keys, "notify me when viewed") live in **Settings** inside the app.
 
 - **Encryption at rest** — every stored PDF (originals, sealed copies), every
   signature image and every uploaded ID document is encrypted on disk with
-  AES-256-GCM. The key is `SIGNFLOW_SECRET` (recommended when hosted) or an
+  AES-256-GCM. The key is `SHALASIGN_SECRET` (recommended when hosted) or an
   auto-generated `secret.key` in the data folder.
 - **Passwords** are bcrypt-hashed. Login is throttled per email (5 failures →
   15 min lock) and per IP. Access-code entry is throttled per signing link.
@@ -121,8 +121,8 @@ API keys, "notify me when viewed") live in **Settings** inside the app.
 ## Your data is permanent (and how to back it up)
 
 All data — accounts, documents, signed PDFs, audit history — is stored in a
-folder called **SignFlowData** in your home folder (Mac: `~/SignFlowData`,
-Windows: `C:\Users\<you>\SignFlowData`), deliberately **outside** the app
+folder called **ShalaSignData** in your home folder (Mac: `~/ShalaSignData`,
+Windows: `C:\Users\<you>\ShalaSignData`), deliberately **outside** the app
 folder, so you can replace the app folder to update it. Hosted deployments use
 the `STORAGE_DIR` env var pointing at a persistent disk; the server prints a
 loud warning at startup (and `/api/health` reports it) if that disk is missing,
@@ -192,7 +192,7 @@ them and to write files to their drive (`Mail.Send` + `Files.ReadWrite`, or
   reach them. If a connected inbox fails, the platform sender is the fallback.
 - **Completed documents are saved to the folder they picked** in OneDrive or
   Google Drive (a folder picker lets them browse or create folders). Inside it:
-  `<SignFlow folder or Unfiled>/<date>_<time>_<signer>.pdf`.
+  `<ShalaSign folder or Unfiled>/<date>_<time>_<signer>.pdf`.
 - Tokens are stored encrypted and refreshed automatically; a broken connection
   shows a *Reconnect* button and the audit trail records what happened.
 
@@ -230,7 +230,7 @@ The public URL, HTTPS and proxy trust are **detected automatically** from real
 requests. Settings are stored in the database (secrets encrypted) and override
 environment variables, which remain as a fallback for container deployments.
 The only true server-side requirements are the hosting ones: a persistent disk
-and, ideally, `SIGNFLOW_SECRET` in the host's secret store.
+and, ideally, `SHALASIGN_SECRET` in the host's secret store.
 
 Google note: `gmail.send` is a Google *restricted* scope — public release
 requires Google's verification and an annual security assessment; `drive.file`
@@ -248,6 +248,7 @@ Create a key in *Settings → API & webhooks* and send it as
 | GET | `/api/health` | Deployment health (storage, email, key source) |
 | POST | `/api/envelopes` | Upload PDF (multipart `pdf`, optional `title`, `message`) → draft |
 | GET | `/api/envelopes?q=&status=&folder=&sort=&limit=&offset=` | List with search/filters |
+| GET | `/api/envelopes?external_system=salesforce&external_id=<record>&updated_since=<ISO>` | Envelopes created from an external system (Salesforce record id) |
 | GET | `/api/envelopes/stats` | Counts, completed last 30 days, avg hours to sign |
 | GET / PATCH / DELETE | `/api/envelopes/:id` | Detail incl. signers, fields, events, attachments / rename / delete (not completed) |
 | PUT | `/api/envelopes/:id/draft` | Autosave Prepare state |
@@ -270,8 +271,20 @@ Send with `merge: {Key: value}`; bulk-send recipients as `{name, email, data: {K
 
 **Webhooks** POST `{event, created_at, data}` with events `envelope.sent`,
 `envelope.completed`, `envelope.declined`, `envelope.voided`,
-`envelope.expired`; header `X-SignFlow-Signature: sha256=<HMAC of body with your secret>`.
+`envelope.expired`; header `X-ShalaSign-Signature: sha256=<HMAC of body with your secret>`.
 Failed deliveries retry 5 times with back-off.
+
+## Salesforce (AppExchange package)
+
+ShalaSign is also a Salesforce managed package, built on the same backend so
+customers can use the web app, the Salesforce app, or both with one account.
+From Account, Contact, Opportunity or any Flow you can **Send with ShalaSign**
+(templates, signers and merge fields pre-filled from the record), see every
+envelope on the record, remind or void, and get the signed PDF attached as a
+File when complete. Envelopes carry the Salesforce record id as an external
+reference (`external_system`, `external_id`, `external_url`) that the API can
+filter on. Source, test instructions and the AppExchange publishing checklist
+are in [salesforce/README.md](salesforce/README.md).
 
 ## Project layout
 
@@ -306,19 +319,22 @@ server/src/
 client/src/
   pages/        – Dashboard, Prepare, SignPage, EnvelopeDetail, Templates, Settings, AuthPage
   components/   – PdfViewer (responsive), SignatureModal (draw/type/upload/saved), Layout, Toast
+salesforce/
+  shalasign-salesforce/ – Salesforce managed package (Apex, LWC, objects, tests)
+  README.md     – install, test and AppExchange publishing steps
 ```
 
 ## Deployment
 
 See [DEPLOY.md](DEPLOY.md) for the plain-language Render guide. The essentials:
-a **persistent disk** mounted where `STORAGE_DIR` points, `SIGNFLOW_SECRET` set
+a **persistent disk** mounted where `STORAGE_DIR` points, `SHALASIGN_SECRET` set
 as a secret, `APP_URL` set to the public address, and SMTP variables. Check
 `/api/health` after deploying. Oracle Cloud "Always Free" is the no-cost
 alternative with a real disk.
 
 ## Roadmap
 
-Email OTP for signers · multiple documents per envelope · text-tag field
+Email OTP for signers · AppExchange listing (security review) · multiple documents per envelope · text-tag field
 placement · public web forms · PAdES digital seal / Aadhaar eSign · radio and
 dropdown fields · localisation · DOCX/image upload. Details and reasoning in
 [docs/COMPARISON.md](docs/COMPARISON.md).

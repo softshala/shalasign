@@ -1,7 +1,7 @@
 @echo off
-title SignFlow
+title ShalaSign
 echo ============================================
-echo  SignFlow - starting up (first run takes a
+echo  ShalaSign - starting up (first run takes a
 echo  few minutes while it downloads components)
 echo ============================================
 
@@ -20,7 +20,7 @@ cd /d "%~dp0"
 for /f "delims=" %%v in ('node -p "process.versions.node.split(^".^")[0]"') do set NODE_MAJOR=%%v
 if %NODE_MAJOR% LSS 22 (
   echo.
-  echo SignFlow needs Node.js 22 or newer. Please install the current LTS from https://nodejs.org
+  echo ShalaSign needs Node.js 22 or newer. Please install the current LTS from https://nodejs.org
   echo and double-click this file again.
   pause
   exit /b
@@ -35,9 +35,9 @@ if not exist "client\dist" (
 )
 
 echo.
-echo SignFlow is running! Opening it in your browser...
+echo ShalaSign is running! Opening it in your browser...
 echo Keep this black window open while you use the app.
-echo (Close this window to stop SignFlow.)
+echo (Close this window to stop ShalaSign.)
 start http://localhost:4000
 set NODE_NO_WARNINGS=1
 cd server && node src/index.js

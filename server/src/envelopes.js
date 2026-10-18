@@ -27,6 +27,11 @@ const upload = multer({
 });
 
 const ownEnvelope = (req) => findEnvelope(req.user, req.params.id);
+/** Integration reference ({external_system, external_id, external_url}) from a request body. */
+function externalRef(b = {}) {
+  const system = String(b.external_system || '').trim().toLowerCase().slice(0, 40) || null;
+  return { system, id: system ? String(b.external_id || '').trim().slice(0, 120) || null : null, url: system && /^https?:\/\//.test(String(b.external_url || '')) ? String(b.external_url).slice(0, 500) : null };
+}
 // For mutations: visible AND editable (sender or workspace admin). Sends the error itself.
 const ownEditable = (req, res) => {
   const env = findEnvelope(req.user, req.params.id);
@@ -104,8 +109,9 @@ export function registerEnvelopeRoutes(app) {
     const hash = sha256(bytes);
     writeEncrypted(req.file.path, bytes);
     const title = String(req.body.title || req.file.originalname.replace(/\.pdf$/i, '')).trim().slice(0, 200) || 'Document';
-    db.prepare(`INSERT INTO envelopes (id, user_id, org_id, title, message, original_pdf, sha256_original, page_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, req.user.id, req.user.org_id, title, String(req.body.message || '').slice(0, 2000), req.file.path, hash, info.pages);
+    const ext = externalRef(req.body);
+    db.prepare(`INSERT INTO envelopes (id, user_id, org_id, title, message, original_pdf, sha256_original, page_count, external_system, external_id, external_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, req.user.id, req.user.org_id, title, String(req.body.message || '').slice(0, 2000), req.file.path, hash, info.pages, ext.system, ext.id, ext.url);
     audit(id, 'envelope.created', actorOf(req.user), `Uploaded "${req.file.originalname}" (${bytes.length} bytes, ${info.pages} page(s), sha256 ${hash.slice(0, 16)}…)`, clientIp(req));
     res.json({ id, sha256: hash, pages: info.pages, title });
   });
@@ -129,10 +135,13 @@ export function registerEnvelopeRoutes(app) {
       const like = `%${q.trim()}%`;
       params.push(like, q.trim(), like, like);
     }
+    if (req.query.external_id) { where.push('e.external_id = ?'); params.push(String(req.query.external_id)); }
+    if (req.query.external_system) { where.push('e.external_system = ?'); params.push(String(req.query.external_system).toLowerCase()); }
+    if (req.query.updated_since) { where.push(`(COALESCE(e.completed_at, e.sent_at, e.created_at) >= ? OR EXISTS (SELECT 1 FROM audit_events a WHERE a.envelope_id = e.id AND a.created_at >= ?))`); params.push(String(req.query.updated_since), String(req.query.updated_since)); }
     const order = { created_desc: 'e.created_at DESC', created_asc: 'e.created_at ASC', title: 'e.title COLLATE NOCASE ASC', status: 'e.status ASC, e.created_at DESC', completed_desc: 'e.completed_at DESC' }[sort] || 'e.created_at DESC';
     const total = db.prepare(`SELECT COUNT(*) n FROM envelopes e WHERE ${where.join(' AND ')}`).get(...params).n;
     const rows = db.prepare(`
-      SELECT e.id, e.title, e.status, e.folder_id, e.created_at, e.sent_at, e.completed_at, e.expires_at, e.seal_error, e.archive_url, e.template_id, e.page_count,
+      SELECT e.id, e.title, e.status, e.folder_id, e.created_at, e.sent_at, e.completed_at, e.expires_at, e.seal_error, e.archive_url, e.template_id, e.page_count, e.external_system, e.external_id, e.external_url, e.sha256_final,
              f.name AS folder_name, u.name AS owner_name, (e.user_id = ?) AS mine,
              (SELECT COUNT(*) FROM signers s WHERE s.envelope_id = e.id) AS signers_total,
              (SELECT COUNT(*) FROM signers s WHERE s.envelope_id = e.id AND s.status = 'signed') AS signers_signed,
@@ -317,6 +326,7 @@ export function registerEnvelopeRoutes(app) {
     const merged = applyMerge(fields, mergeData);
     if (merged.missing.length) return res.status(400).json({ error: `Missing merge data for: ${merged.missing.join(', ')}`, missing: merged.missing });
     fields = merged.fields;
+    const ext = externalRef(b); if (ext.system) db.prepare(`UPDATE envelopes SET external_system = ?, external_id = ?, external_url = ? WHERE id = ?`).run(ext.system, ext.id, ext.url, env.id);
     const title = mergeText(typeof b.title === 'string' && b.title.trim() ? b.title.trim().slice(0, 200) : env.title, mergeData);
     const message = mergeText(typeof b.message === 'string' ? b.message.trim().slice(0, 2000) : env.message, mergeData);
 

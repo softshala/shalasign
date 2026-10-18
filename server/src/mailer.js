@@ -130,14 +130,14 @@ const layout = (body, brand = {}) => {
   const color = brand.color || '#2f6fed';
   const header = brand.logoUrl
     ? `<img src="${esc(brand.logoUrl)}" alt="${esc(brand.company || 'Logo')}" style="max-height:40px;max-width:200px;display:block">`
-    : `<span style="font-size:20px;font-weight:700;color:${color}">&#9998; ${esc(brand.company || setting('platform_name') || 'SignFlow')}</span>`;
+    : `<span style="font-size:20px;font-weight:700;color:${color}">&#9998; ${esc(brand.company || setting('platform_name') || 'ShalaSign')}</span>`;
   return `
   <div style="font-family:Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;color:#1b2430">
     <div style="padding:18px 0">${header}</div>
     <div style="border:1px solid #e2e6ec;border-radius:10px;padding:26px">${body}</div>
     <p style="color:#9aa2ad;font-size:12px;margin-top:14px;line-height:1.5">
       ${brand.footer ? esc(brand.footer) + '<br>' : ''}
-      ${brand.company ? `Sent via ${esc(setting('platform_name') || 'SignFlow')} on behalf of ${esc(brand.company)}.` : `Sent via ${esc(setting('platform_name') || 'SignFlow')}.`}
+      ${brand.company ? `Sent via ${esc(setting('platform_name') || 'ShalaSign')} on behalf of ${esc(brand.company)}.` : `Sent via ${esc(setting('platform_name') || 'ShalaSign')}.`}
     </p>
   </div>`;
 };
@@ -205,8 +205,8 @@ export function sendViewedNotice({ to, envelope, signerName, brand = {} }) {
 }
 
 export function sendOrgInvite({ to, orgName, inviterName, link, brand = {} }) {
-  return send(to, `${inviterName} invited you to ${orgName} on SignFlow`, layout(`
-      <p><strong>${esc(inviterName)}</strong> has invited you to join the <strong>${esc(orgName)}</strong> workspace on SignFlow, so you can send and track documents for signature together.</p>
+  return send(to, `${inviterName} invited you to ${orgName} on ShalaSign`, layout(`
+      <p><strong>${esc(inviterName)}</strong> has invited you to join the <strong>${esc(orgName)}</strong> workspace on ShalaSign, so you can send and track documents for signature together.</p>
       ${button(link, 'Accept invitation', brand.color || '#2f6fed')}
       <p style="color:#68707c;font-size:13px">The invitation expires in 7 days.</p>
     `, brand), undefined, ctxFor(brand));
@@ -214,15 +214,15 @@ export function sendOrgInvite({ to, orgName, inviterName, link, brand = {} }) {
 
 // ---------- Account emails (platform sender only) ----------
 export function sendLoginCode({ to, code, minutes }) {
-  return send(to, `${code} is your SignFlow sign-in code`, layout(`
-      <p>Use this code to sign in to SignFlow:</p>
+  return send(to, `${code} is your ShalaSign sign-in code`, layout(`
+      <p>Use this code to sign in to ShalaSign:</p>
       <p style="font-size:34px;letter-spacing:10px;font-weight:700;font-family:Menlo,Consolas,monospace;margin:18px 0">${esc(code)}</p>
       <p style="color:#68707c;font-size:13px">It expires in ${minutes} minutes. If you didn't request it, you can ignore this email — nobody can sign in without the code.</p>
     `));
 }
 
 export function sendPasswordReset({ to, name, link }) {
-  return send(to, 'Reset your SignFlow password', layout(`
+  return send(to, 'Reset your ShalaSign password', layout(`
       <p>Hi ${esc(name)},</p>
       <p>Click below to choose a new password. The link works once and expires in 1 hour.</p>
       ${button(link, 'Reset password', '#2f6fed')}
@@ -234,11 +234,11 @@ export function sendPasswordReset({ to, name, link }) {
 export async function sendPlatformTest({ to, name }) {
   const t = getTransporter();
   if (!t) return { error: 'Platform sender is not configured' };
-  try { await t.sendMail({ from: fromAddress(), to, subject: `${setting('platform_name') || 'SignFlow'} platform email test`, html: layout(`<p>Hi ${esc(name)},</p><p>The platform sender works. Login codes, password resets and documents from users without their own inbox will be sent like this.</p>`) }); return { sent: true }; }
+  try { await t.sendMail({ from: fromAddress(), to, subject: `${setting('platform_name') || 'ShalaSign'} platform email test`, html: layout(`<p>Hi ${esc(name)},</p><p>The platform sender works. Login codes, password resets and documents from users without their own inbox will be sent like this.</p>`) }); return { sent: true }; }
   catch (e) { return { error: e.message }; }
 }
 
 /** Send a test email from whatever route the user currently has. */
 export function sendTestEmail({ to, brand }) {
-  return send(to, 'SignFlow test email', layout(`<p>Hi ${esc(brand.senderName || '')},</p><p>This is a test email from SignFlow. If you are reading it, your email connection works and signers will receive their documents like this.</p>`, brand), undefined, ctxFor(brand));
+  return send(to, 'ShalaSign test email', layout(`<p>Hi ${esc(brand.senderName || '')},</p><p>This is a test email from ShalaSign. If you are reading it, your email connection works and signers will receive their documents like this.</p>`, brand), undefined, ctxFor(brand));
 }

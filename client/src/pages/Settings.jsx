@@ -46,7 +46,7 @@ function Connections() {
   const act = async (fn, msg) => { setBusy(true); try { await fn(); if (msg) toast(msg); await load(); } catch (e) { toast(e.message, { bad: true, ms: 6000 }); } finally { setBusy(false); } };
   const disconnect = (c) => { if (confirm(`Disconnect ${c.account_email}? Documents will fall back to the platform sender and no archive.`)) act(() => api(`/api/connections/${c.id}`, { method: 'DELETE' }), 'Disconnected'); };
   const testEmail = () => act(async () => { const r = await api('/api/org/test-email', { method: 'POST' }); if (!r.ok) throw new Error(r.error); toast(`Test email sent to you from ${r.account} via ${label(r.via)}${r.fallback_from ? ` (your ${label(r.fallback_from)} connection failed, platform sender used)` : ''}`, { ms: 7000 }); });
-  const label = (v) => ({ microsoft: 'Microsoft 365', google: 'Google', platform: 'the SignFlow sender' }[v] || v);
+  const label = (v) => ({ microsoft: 'Microsoft 365', google: 'Google', platform: 'the ShalaSign sender' }[v] || v);
   const sharedMail = d.org?.email_mode === 'shared';
   const sharedStorage = d.org?.storage_mode === 'shared';
 
@@ -86,12 +86,12 @@ function Connections() {
           <div>
             <div className="muted small">Your signing emails are sent from</div>
             <strong>{d.effective.mail.via === 'none' ? 'nowhere yet' : d.effective.mail.account}</strong>
-            <span className="muted"> {d.effective.mail.via === 'platform' ? '(SignFlow sender, replies go to you)' : d.effective.mail.via === 'none' ? '' : `via ${d.effective.mail.label}${d.effective.mail.reason === 'shared' ? ' · set by your workspace admin' : ''}`}</span>
+            <span className="muted"> {d.effective.mail.via === 'platform' ? '(ShalaSign sender, replies go to you)' : d.effective.mail.via === 'none' ? '' : `via ${d.effective.mail.label}${d.effective.mail.reason === 'shared' ? ' · set by your workspace admin' : ''}`}</span>
             {d.effective.mail.via === 'none' && <div className="error small">Connect an inbox below so signers can receive their links.</div>}
           </div>
           <div>
             <div className="muted small">Completed documents are saved to</div>
-            <strong>{d.effective.storage.via === 'none' ? 'SignFlow only' : `${d.effective.storage.label === 'Google' ? 'Google Drive' : 'OneDrive'} · ${d.effective.storage.root_path || 'root'}`}</strong>
+            <strong>{d.effective.storage.via === 'none' ? 'ShalaSign only' : `${d.effective.storage.label === 'Google' ? 'Google Drive' : 'OneDrive'} · ${d.effective.storage.root_path || 'root'}`}</strong>
             <span className="muted"> {d.effective.storage.via !== 'none' ? `(${d.effective.storage.account}${d.effective.storage.shared ? ', workspace drive set by your admin' : ''})` : ''}</span>
           </div>
         </div>
@@ -112,7 +112,7 @@ function Connections() {
             {[ms, gg].filter((c) => c?.can_mail).map((c) => (
               <label key={c.id} className="row" style={{ gap: 8 }}><input type="radio" name="mail" checked={(d.choices.mail_connection_id || d.effective.mail.account === c.account_email) && d.effective.mail.account === c.account_email} onChange={() => act(() => api('/api/connections/mail-choice', { method: 'PUT', body: { connection_id: c.id } }), 'Saved')} /> {c.account_email} <span className="muted small">({c.label})</span></label>
             ))}
-            {d.effective.mail.via !== 'none' && <label className="row" style={{ gap: 8 }}><input type="radio" name="mail" checked={d.effective.mail.via === 'platform'} onChange={() => act(() => api('/api/connections/mail-choice', { method: 'PUT', body: { connection_id: null } }), 'Saved')} disabled={!d.connections.length} /> The SignFlow sender <span className="muted small">(replies still come to you)</span></label>}
+            {d.effective.mail.via !== 'none' && <label className="row" style={{ gap: 8 }}><input type="radio" name="mail" checked={d.effective.mail.via === 'platform'} onChange={() => act(() => api('/api/connections/mail-choice', { method: 'PUT', body: { connection_id: null } }), 'Saved')} disabled={!d.connections.length} /> The ShalaSign sender <span className="muted small">(replies still come to you)</span></label>}
           </div>
         </div>
       )}
@@ -121,7 +121,7 @@ function Connections() {
       {(ms?.can_storage || gg?.can_storage) && !sharedStorage && (
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Save completed documents to</h3>
-          <p className="muted" style={{ marginTop: 0 }}>Pick a folder. Inside it, SignFlow creates a sub-folder per SignFlow folder (or "Unfiled") and names each file <code>date_time_signer.pdf</code>.</p>
+          <p className="muted" style={{ marginTop: 0 }}>Pick a folder. Inside it, ShalaSign creates a sub-folder per ShalaSign folder (or "Unfiled") and names each file <code>date_time_signer.pdf</code>.</p>
           <div className="stack">
             {[ms, gg].filter((c) => c?.can_storage).map((c) => (
               <div key={c.id} className="row">
@@ -129,7 +129,7 @@ function Connections() {
                 {d.choices.archive_connection_id === c.id && <span className="muted small">→ {d.choices.archive_root_path || 'root'} <button className="ghost small" onClick={() => setPicker({ connectionId: c.id, provider: c.provider })}>Change folder</button></span>}
               </div>
             ))}
-            <label className="row" style={{ gap: 8 }}><input type="radio" name="store" checked={!d.choices.archive_connection_id} onChange={() => act(() => api('/api/connections/archive-target', { method: 'PUT', body: { connection_id: null } }), 'Saved')} /> Keep documents in SignFlow only</label>
+            <label className="row" style={{ gap: 8 }}><input type="radio" name="store" checked={!d.choices.archive_connection_id} onChange={() => act(() => api('/api/connections/archive-target', { method: 'PUT', body: { connection_id: null } }), 'Saved')} /> Keep documents in ShalaSign only</label>
           </div>
         </div>
       )}
@@ -220,7 +220,7 @@ function Workspace() {
         <div className="grid-2">
           <div className="card">
             <h3 style={{ marginTop: 0 }}>Who sends the emails?</h3>
-            <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}><input type="radio" name="em" checked={org.email_mode === 'individual'} onChange={() => save({ email_mode: 'individual' })} /><span><strong>Each member from their own inbox</strong><br /><span className="muted small">Members connect Microsoft 365 or Google under Connected accounts. Anyone who hasn't gets the SignFlow sender.</span></span></label>
+            <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}><input type="radio" name="em" checked={org.email_mode === 'individual'} onChange={() => save({ email_mode: 'individual' })} /><span><strong>Each member from their own inbox</strong><br /><span className="muted small">Members connect Microsoft 365 or Google under Connected accounts. Anyone who hasn't gets the ShalaSign sender.</span></span></label>
             <label className="row" style={{ gap: 8, alignItems: 'flex-start', marginTop: 10 }}><input type="radio" name="em" checked={org.email_mode === 'shared'} disabled={!mailConns.length} onChange={() => { if (mailConns.length === 1) save({ email_mode: 'shared', shared_mail_connection_id: mailConns[0].id }); }} /><span><strong>One shared inbox for the whole workspace</strong><br /><span className="muted small">e.g. contracts@yourcompany.com. Must be connected by a member first.</span></span></label>
             {(org.email_mode === 'shared' || mailConns.length > 1) && mailConns.length > 0 && (
               <select style={{ width: '100%', marginTop: 10 }} value={org.shared_mail_connection_id || ''} onChange={(e) => save({ email_mode: 'shared', shared_mail_connection_id: e.target.value })}>
@@ -286,7 +286,7 @@ function Workspace() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Claude & MCP: connect Claude to SignFlow, in-app assistant status    */
+/* Claude & MCP: connect Claude to ShalaSign, in-app assistant status    */
 /* ------------------------------------------------------------------ */
 function ClaudeTab() {
   const [status, setStatus] = useState(null);
@@ -306,12 +306,12 @@ function ClaudeTab() {
   useEffect(() => { load(); }, []);
   const createKey = async () => { try { const k = await api('/api/settings/api-keys', { method: 'POST', body: { name: 'Claude Desktop / Code' } }); setNewKey(k); load(); } catch (e) { toast(e.message, { bad: true }); } };
   const revoke = async (g) => { if (!confirm(`Disconnect ${g.name}?`)) return; await api(`/api/oauth/grants/${g.client_id}`, { method: 'DELETE' }); load(); toast('Disconnected'); };
-  const desktopConfig = JSON.stringify({ mcpServers: { signflow: { command: 'npx', args: ['-y', 'mcp-remote', mcpUrl, '--header', `Authorization: Bearer ${newKey?.key || 'sf_live_YOUR_KEY'}`] } } }, null, 2);
+  const desktopConfig = JSON.stringify({ mcpServers: { shalasign: { command: 'npx', args: ['-y', 'mcp-remote', mcpUrl, '--header', `Authorization: Bearer ${newKey?.key || 'sf_live_YOUR_KEY'}`] } } }, null, 2);
   return (
     <>
       <div className="card tight" style={{ background: '#eef5ff', borderColor: '#c9dafb' }}>
-        <strong>Use SignFlow from Claude, or Claude from inside SignFlow.</strong>
-        <div className="muted small" style={{ marginTop: 4 }}>SignFlow has a built-in MCP server. Claude can list your documents, send templates, upload and send PDFs, remind and void — as you, with everything in the audit trail. The in-app assistant (✨ Ask, bottom right) uses the same tools.</div>
+        <strong>Use ShalaSign from Claude, or Claude from inside ShalaSign.</strong>
+        <div className="muted small" style={{ marginTop: 4 }}>ShalaSign has a built-in MCP server. Claude can list your documents, send templates, upload and send PDFs, remind and void — as you, with everything in the audit trail. The in-app assistant (✨ Ask, bottom right) uses the same tools.</div>
       </div>
       <div className="grid-2">
         <div className="card">
@@ -319,7 +319,7 @@ function ClaudeTab() {
           <ol style={{ paddingLeft: 20, fontSize: 14, marginTop: 0 }}>
             <li>In claude.ai open <em>Settings → Connectors → Add custom connector</em>.</li>
             <li>Paste this URL:<div className="copy-link" style={{ marginTop: 4 }}>{mcpUrl}<button className="secondary" onClick={() => copyText(mcpUrl).then(() => toast('Copied'))}>Copy</button></div></li>
-            <li>Click Connect. You will be sent to SignFlow to log in and approve access, then back to Claude.</li>
+            <li>Click Connect. You will be sent to ShalaSign to log in and approve access, then back to Claude.</li>
           </ol>
           <h4 style={{ marginBottom: 6 }}>Connected apps</h4>
           {grants.length === 0 && <p className="muted small" style={{ marginTop: 0 }}>Nothing connected yet.</p>}
@@ -330,7 +330,7 @@ function ClaudeTab() {
           <p className="muted small" style={{ marginTop: 0 }}>These accept a token directly. Create an API key, then add the server:</p>
           {newKey ? <div className="notice ok">Key created — copy it now, it is shown once:<div className="copy-link" style={{ marginTop: 6 }}>{newKey.key}<button className="secondary" onClick={() => copyText(newKey.key).then(() => toast('Copied'))}>Copy</button></div></div> : <button className="secondary small" onClick={createKey}>+ Create API key for Claude</button>}
           <p className="small" style={{ marginBottom: 4 }}>Claude Code (terminal):</p>
-          <div className="copy-link">{`claude mcp add --transport http signflow ${mcpUrl} --header "Authorization: Bearer ${newKey?.key || 'sf_live_YOUR_KEY'}"`}<button className="secondary" onClick={() => copyText(`claude mcp add --transport http signflow ${mcpUrl} --header "Authorization: Bearer ${newKey?.key || 'sf_live_YOUR_KEY'}"`).then(() => toast('Copied'))}>Copy</button></div>
+          <div className="copy-link">{`claude mcp add --transport http shalasign ${mcpUrl} --header "Authorization: Bearer ${newKey?.key || 'sf_live_YOUR_KEY'}"`}<button className="secondary" onClick={() => copyText(`claude mcp add --transport http shalasign ${mcpUrl} --header "Authorization: Bearer ${newKey?.key || 'sf_live_YOUR_KEY'}"`).then(() => toast('Copied'))}>Copy</button></div>
           <p className="small" style={{ marginBottom: 4, marginTop: 10 }}>Claude Desktop (claude_desktop_config.json):</p>
           <pre className="copy-link" style={{ display: 'block', whiteSpace: 'pre-wrap', margin: 0 }}>{desktopConfig}</pre>
           <p className="muted small">Existing keys are managed under API &amp; webhooks.</p>
@@ -338,7 +338,7 @@ function ClaudeTab() {
       </div>
       <div className="card">
         <h3 style={{ marginTop: 0 }}>In-app assistant (✨ Ask)</h3>
-        <p className="muted" style={{ marginTop: 0 }}>The assistant runs Claude ({status?.model}) on <strong>your own Anthropic account</strong>, so usage is billed to you, not to SignFlow. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com → API keys</a> (a few cents per request is typical). Prefer not to? Use SignFlow from Claude via the connector above instead — your Claude subscription covers that.</p>
+        <p className="muted" style={{ marginTop: 0 }}>The assistant runs Claude ({status?.model}) on <strong>your own Anthropic account</strong>, so usage is billed to you, not to ShalaSign. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com → API keys</a> (a few cents per request is typical). Prefer not to? Use ShalaSign from Claude via the connector above instead — your Claude subscription covers that.</p>
         {status?.enabled && <p className="notice ok">Active using {status.source === 'workspace' ? 'the workspace key' : status.source === 'user' ? 'your key' : 'the shared platform key'} {status.hint || ''}.</p>}
         <div className="grid-2">
           <div>
@@ -425,11 +425,11 @@ function Account({ tab }) {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Preview</h3>
         <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 20, fontFamily: 'Segoe UI, Arial, sans-serif' }}>
-          <div style={{ marginBottom: 14 }}>{form.logo_data ? <img src={form.logo_data} alt="" style={{ maxHeight: 40, maxWidth: 200 }} /> : <strong style={{ color: form.brand_color || '#2f6fed', fontSize: 20 }}>✒ {form.company || 'SignFlow'}</strong>}</div>
+          <div style={{ marginBottom: 14 }}>{form.logo_data ? <img src={form.logo_data} alt="" style={{ maxHeight: 40, maxWidth: 200 }} /> : <strong style={{ color: form.brand_color || '#2f6fed', fontSize: 20 }}>✒ {form.company || 'ShalaSign'}</strong>}</div>
           <p style={{ margin: '0 0 8px' }}>Hi Asha,</p>
           <p style={{ margin: '0 0 14px' }}>{s.profile.name}{form.company ? ` (${form.company})` : ''} has asked you to review and sign <strong>Offer Letter</strong>.</p>
           <span style={{ background: form.brand_color || '#2f6fed', color: '#fff', padding: '10px 18px', borderRadius: 8, fontWeight: 600, display: 'inline-block' }}>Review &amp; sign document</span>
-          <p className="muted" style={{ marginTop: 14 }}>{form.email_footer || `Sent via SignFlow${form.company ? ` on behalf of ${form.company}` : ''}.`}</p>
+          <p className="muted" style={{ marginTop: 14 }}>{form.email_footer || `Sent via ShalaSign${form.company ? ` on behalf of ${form.company}` : ''}.`}</p>
         </div>
       </div>
     </div>
@@ -463,8 +463,8 @@ function Account({ tab }) {
       </div>
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Webhook</h3>
-        <p className="muted" style={{ marginTop: 0 }}>We POST a JSON event to this URL when an envelope is sent, completed, declined, voided or expires. Each request is signed with HMAC-SHA256 in the <code>X-SignFlow-Signature</code> header.</p>
-        <label className="field"><span>Endpoint URL</span><input value={form.webhook_url || ''} placeholder="https://example.com/signflow-webhook" onChange={(e) => setForm({ ...form, webhook_url: e.target.value })} /></label>
+        <p className="muted" style={{ marginTop: 0 }}>We POST a JSON event to this URL when an envelope is sent, completed, declined, voided or expires. Each request is signed with HMAC-SHA256 in the <code>X-ShalaSign-Signature</code> header.</p>
+        <label className="field"><span>Endpoint URL</span><input value={form.webhook_url || ''} placeholder="https://example.com/shalasign-webhook" onChange={(e) => setForm({ ...form, webhook_url: e.target.value })} /></label>
         <div className="row" style={{ marginBottom: 12 }}>
           <button disabled={busy} onClick={() => save({ webhook_url: form.webhook_url })}>Save</button>
           <button className="secondary" disabled={busy || !s.webhook.url} onClick={testHook}>Send test event</button>

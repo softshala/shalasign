@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 
-/** /oauth/consent — "Allow <app> to use SignFlow as you?" for MCP clients such as claude.ai. */
+/** /oauth/consent — "Allow <app> to use ShalaSign as you?" for MCP clients such as claude.ai. */
 export default function OAuthConsent() {
   const [params] = useSearchParams();
   const nav = useNavigate();
@@ -28,14 +28,14 @@ export default function OAuthConsent() {
   return (
     <div style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div className="card" style={{ maxWidth: 460, width: '100%' }}>
-        <div className="auth-logo" style={{ color: 'var(--brand)', marginBottom: 12 }}>✒️ SignFlow</div>
+        <div className="auth-logo" style={{ color: 'var(--brand)', marginBottom: 12 }}>✒️ ShalaSign</div>
         {error && !info && <><h2 style={{ marginTop: 0 }}>Cannot continue</h2><p className="error">{error}</p></>}
         {!info && !error && <p className="muted">Loading…</p>}
         {info && (
           <>
-            <h2 style={{ margin: '0 0 6px' }}>Allow {info.client.name} to use SignFlow?</h2>
+            <h2 style={{ margin: '0 0 6px' }}>Allow {info.client.name} to use ShalaSign?</h2>
             <p className="muted" style={{ marginTop: 0 }}>Requested by <strong>{info.client.redirect_host}</strong>. You are signed in as <strong>{info.user.email}</strong>.</p>
-            <p style={{ fontSize: 14 }}>{info.client.name} will be able to act as you in SignFlow:</p>
+            <p style={{ fontSize: 14 }}>{info.client.name} will be able to act as you in ShalaSign:</p>
             <ul style={{ fontSize: 14, paddingLeft: 20, marginTop: 0 }}>
               <li>See your documents, templates and their status</li>
               <li>Send documents and templates for signature, remind and void</li>

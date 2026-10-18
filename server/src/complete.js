@@ -32,6 +32,7 @@ export function envelopePayload(id) {
     id: env.id, title: env.title, status: env.status, created_at: env.created_at, sent_at: env.sent_at,
     completed_at: env.completed_at, expires_at: env.expires_at, sha256_original: env.sha256_original, sha256_final: env.sha256_final,
     folder_id: env.folder_id, template_id: env.template_id, signers,
+    external: env.external_system ? { system: env.external_system, id: env.external_id, url: env.external_url } : null,
     download_url: env.status === 'completed' ? `${appUrl()}/api/envelopes/${env.id}/download` : null,
     archive_url: env.archive_url || null,
   };

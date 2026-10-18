@@ -71,7 +71,7 @@ export default function AuthPage({ mode: initialMode = 'login' }) {
     <div className="auth-wrap">
       <div className="auth-brand">
         <div>
-          <div className="auth-logo">✒️ SignFlow</div>
+          <div className="auth-logo">✒️ ShalaSign</div>
           <h1 className="auth-headline">Get documents signed,<br />without the friction.</h1>
           <p className="auth-sub">Upload a PDF, place signature fields, and send. Signers sign from any device — no account needed. Every completed document comes sealed with a tamper-evident certificate.</p>
           <ul className="auth-points">
@@ -86,8 +86,8 @@ export default function AuthPage({ mode: initialMode = 'login' }) {
 
       <div className="auth-form-side">
         <div className="auth-card">
-          <div className="auth-logo mobile-only" style={{ marginBottom: 18 }}>✒️ SignFlow</div>
-          {providers?.platform_name && providers.platform_name !== 'SignFlow' && <div className="muted small" style={{ marginBottom: 6 }}>{providers.platform_name}</div>}
+          <div className="auth-logo mobile-only" style={{ marginBottom: 18 }}>✒️ ShalaSign</div>
+          {providers?.platform_name && providers.platform_name !== 'ShalaSign' && <div className="muted small" style={{ marginBottom: 6 }}>{providers.platform_name}</div>}
           <h2 style={{ margin: '0 0 4px' }}>{headings[0]}</h2>
           {mode === 'signup' && providers?.signup_mode === 'invite_only' && <p className="notice warn">Sign-up is by invitation only. Use the link from your invitation email.</p>}
           <p className="muted" style={{ marginTop: 0, marginBottom: 20 }}>{headings[1]}</p>
@@ -133,7 +133,7 @@ export default function AuthPage({ mode: initialMode = 'login' }) {
             <form onSubmit={verifyCode}>
               {notice && <p className="notice">{notice}</p>}
               {otp.newAccount && (
-                <label className="field"><span>Your name <span className="muted" style={{ fontWeight: 400 }}>(this email is new to SignFlow)</span></span>
+                <label className="field"><span>Your name <span className="muted" style={{ fontWeight: 400 }}>(this email is new to ShalaSign)</span></span>
                   <input placeholder="Your name" value={form.name} autoComplete="name" onChange={(e) => setForm({ ...form, name: e.target.value })} required />
                 </label>
               )}

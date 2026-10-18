@@ -1,0 +1,24 @@
+<template>
+    <lightning-card title="ShalaSign setup" icon-name="custom:custom51">
+        <div class="slds-p-horizontal_medium slds-p-bottom_medium">
+            <p class="slds-text-color_weak slds-m-bottom_medium">Connect this org to your ShalaSign account. Create an API key in ShalaSign under <b>Settings &rarr; API &amp; webhooks</b> and paste it here. Everything sent from Salesforce also appears in ShalaSign.</p>
+            <template lwc:if={status.connected}>
+                <div class="slds-box slds-theme_success slds-m-bottom_medium">Connected as {status.connectedAs} (key {status.keyHint})</div>
+                <lightning-button label="Disconnect" variant="destructive-text" onclick={handleDisconnect} class="slds-m-right_small"></lightning-button>
+            </template>
+            <template lwc:else>
+                <lightning-input type="password" label="ShalaSign API key" value={apiKey} onchange={handleKey} placeholder="sf_live_..."></lightning-input>
+                <lightning-button label="Connect" variant="brand" onclick={handleConnect} disabled={busy} class="slds-m-top_small"></lightning-button>
+            </template>
+            <hr/>
+            <h3 class="slds-text-heading_small slds-m-bottom_x-small">Status sync</h3>
+            <p class="slds-text-color_weak slds-m-bottom_small">A scheduled job refreshes envelopes awaiting signature every 15 minutes and attaches the signed PDF to the record when complete.</p>
+            <template lwc:if={status.syncScheduled}><span class="slds-badge slds-theme_success slds-m-right_small">Scheduled</span></template>
+            <template lwc:else><lightning-button label="Schedule sync job" onclick={handleSchedule} disabled={notConnected} class="slds-m-right_small"></lightning-button></template>
+            <lightning-button label="Sync now" onclick={handleSyncNow} disabled={notConnected}></lightning-button>
+            <hr/>
+            <h3 class="slds-text-heading_small slds-m-bottom_x-small">Where is ShalaSign?</h3>
+            <p class="slds-text-color_weak">Calls go to the <b>ShalaSign</b> Named Credential (Setup &rarr; Named Credentials). Edit its URL if you self-host ShalaSign. Template-to-object field mappings live in <b>Custom Metadata &rarr; ShalaSign Template Mapping</b>.</p>
+        </div>
+    </lightning-card>
+</template>

@@ -17,7 +17,7 @@ const KEYS = {
   assistant_shared_key: { env: 'ANTHROPIC_API_KEY', secret: true }, assistant_shared: { env: 'ASSISTANT_SHARED_KEY' }, assistant_model: { env: 'ASSISTANT_MODEL' },
   archive_timezone: { env: 'ONEDRIVE_TIMEZONE' },
 };
-const DEFAULTS = { platform_name: 'SignFlow', trust_proxy: 'auto', signup_mode: 'open', ms_tenant: 'common', assistant_model: 'claude-opus-5-5', archive_timezone: 'Asia/Kolkata', smtp_port: '465' };
+const DEFAULTS = { platform_name: 'ShalaSign', trust_proxy: 'auto', signup_mode: 'open', ms_tenant: 'common', assistant_model: 'claude-opus-5-5', archive_timezone: 'Asia/Kolkata', smtp_port: '465' };
 
 let cache = null;
 function load() {
@@ -185,4 +185,4 @@ export function registerPlatformRoutes(app) {
   });
 }
 
-export const escName = () => esc(setting('platform_name') || 'SignFlow');
+export const escName = () => esc(setting('platform_name') || 'ShalaSign');

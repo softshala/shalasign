@@ -27,3 +27,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# Salesforce CLI local state
+.sf/
+.sfdx/
+salesforce/shalasign-salesforce/node_modules/

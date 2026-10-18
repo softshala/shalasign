@@ -34,7 +34,7 @@ export default function Admin() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Is this installation ready?</h3>
           <Row ok={health ? health.storage_is_persistent_disk : true} label="Persistent storage" detail={health ? (health.storage_is_persistent_disk ? 'documents survive restarts' : 'NOT persistent — attach a disk on the host and set STORAGE_DIR') : ''} />
-          <Row ok={health?.encryption_key_source === 'env'} warn label="Encryption key" detail={health?.encryption_key_source === 'env' ? 'held in the host\'s secret store' : 'stored next to the data (set SIGNFLOW_SECRET on the host for stronger protection)'} />
+          <Row ok={health?.encryption_key_source === 'env'} warn label="Encryption key" detail={health?.encryption_key_source === 'env' ? 'held in the host\'s secret store' : 'stored next to the data (set SHALASIGN_SECRET on the host for stronger protection)'} />
           <Row ok={s.url_source !== 'localhost'} label="Public URL" detail={`${s.public_url} (${s.url_source})`} fix="general" />
           <Row ok={s.email} label="Platform email" detail={s.email ? 'configured' : 'not configured — login codes and resets are off; users must connect their own inbox'} fix="email" />
           <Row ok={s.microsoft} warn label="Microsoft sign-in & connections" detail={s.microsoft ? `configured (tenant ${s.ms_tenant})` : 'not configured'} fix="providers" />

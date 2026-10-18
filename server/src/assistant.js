@@ -1,4 +1,4 @@
-// In-app assistant: Claude with the SignFlow tools, acting as the logged-in user.
+// In-app assistant: Claude with the ShalaSign tools, acting as the logged-in user.
 // POST /api/assistant/chat { messages: [...prior turns], message: "text" }
 //   → { reply, actions: [{tool, input, ok, summary}], messages: full history to send back next time }
 import Anthropic from '@anthropic-ai/sdk';
@@ -38,7 +38,7 @@ const MAX_HISTORY = 40;    // messages kept from the client-provided history
 
 function systemPrompt(user) {
   const org = getOrg(user.org_id);
-  return `You are the SignFlow assistant, embedded in the SignFlow e-signature web app. You act on behalf of the logged-in user using the tools; everything you do is recorded in the audit trail under their name.
+  return `You are the ShalaSign assistant, embedded in the ShalaSign e-signature web app. You act on behalf of the logged-in user using the tools; everything you do is recorded in the audit trail under their name.
 
 User: ${user.name} <${user.email}>, role ${user.role} in workspace "${org?.name || 'personal'}". App URL: ${appUrl()}. Today: ${new Date().toISOString().slice(0, 10)}.
 
@@ -112,7 +112,7 @@ export function registerAssistantRoutes(app) {
     const history = Array.isArray(req.body?.messages) ? req.body.messages.slice(-MAX_HISTORY) : [];
     if (!text) return res.status(400).json({ error: 'message is required' });
 
-    // The assistant calls SignFlow's API as this user (cookie forwarded over loopback).
+    // The assistant calls ShalaSign's API as this user (cookie forwarded over loopback).
     const ctx = { headers: { cookie: req.headers.cookie || '' } };
     const messages = [...history, { role: 'user', content: text }];
     const actions = [];

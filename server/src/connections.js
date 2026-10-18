@@ -5,7 +5,7 @@
 // the operator; that's the only server-side setup, exactly like Zoho/Adobe.
 //
 //   Microsoft: Mail.Send (send as the user), Files.ReadWrite (their OneDrive)
-//   Google:    gmail.send, drive.file (only files SignFlow creates)
+//   Google:    gmail.send, drive.file (only files ShalaSign creates)
 //
 // Tokens are encrypted at rest and refreshed automatically.
 import crypto from 'crypto';

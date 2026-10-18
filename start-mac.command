@@ -1,7 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 echo "============================================"
-echo " SignFlow — starting up (first run takes a"
+echo " ShalaSign — starting up (first run takes a"
 echo " few minutes while it downloads components)"
 echo "============================================"
 
@@ -17,7 +17,7 @@ fi
 NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
 if [ "$NODE_MAJOR" -lt 22 ]; then
   echo ""
-  echo "SignFlow needs Node.js 22 or newer; you have $(node --version)."
+  echo "ShalaSign needs Node.js 22 or newer; you have $(node --version)."
   echo "Please install the current LTS from https://nodejs.org and run this file again."
   read -n 1 -s -r -p "Press any key to close..."
   exit 1
@@ -29,7 +29,7 @@ echo "Checking app components (quick if already installed)..."
 [ -d client/dist ] || (echo "Preparing the app screens..." && cd client && npm run build --silent)
 
 echo ""
-echo "SignFlow is running! Opening it in your browser..."
+echo "ShalaSign is running! Opening it in your browser..."
 echo "Keep this window open while you use the app."
 (sleep 2 && open http://localhost:4000) &
 cd server && NODE_NO_WARNINGS=1 node src/index.js

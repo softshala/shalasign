@@ -1,6 +1,6 @@
-# SignFlow vs Adobe Acrobat Sign vs Zoho Sign
+# ShalaSign vs Adobe Acrobat Sign vs Zoho Sign
 
-Feature-by-feature comparison of SignFlow against the two most widely used
+Feature-by-feature comparison of ShalaSign against the two most widely used
 commercial e-signature products, with the roadmap items that remain. Compiled
 October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/sign/features.html),
 [Zoho](https://www.zoho.com/sign/features.html)) and third-party reviews.
@@ -9,7 +9,7 @@ October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/
 
 ## Sending & preparing
 
-| Capability | SignFlow | Acrobat Sign | Zoho Sign |
+| Capability | ShalaSign | Acrobat Sign | Zoho Sign |
 |---|---|---|---|
 | Upload PDF, place fields by click, drag to move, resize | ✅ | ✅ | ✅ |
 | Field types: signature, initials, date, text, checkbox | ✅ | ✅ + radio, dropdown, attachment, payment | ✅ + radio, dropdown, attachment |
@@ -31,7 +31,7 @@ October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/
 
 ## Signing experience
 
-| Capability | SignFlow | Acrobat Sign | Zoho Sign |
+| Capability | ShalaSign | Acrobat Sign | Zoho Sign |
 |---|---|---|---|
 | No account needed for signers | ✅ | ✅ | ✅ |
 | Works on phones (responsive, touch) | ✅ | ✅ + native apps | ✅ + native apps |
@@ -50,7 +50,7 @@ October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/
 
 ## Tracking, reminders & lifecycle
 
-| Capability | SignFlow | Acrobat Sign | Zoho Sign |
+| Capability | ShalaSign | Acrobat Sign | Zoho Sign |
 |---|---|---|---|
 | Real-time status (sent, viewed, signed, waiting on) | ✅ | ✅ | ✅ |
 | Automatic reminders every N days | ✅ | ✅ | ✅ |
@@ -65,7 +65,7 @@ October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/
 
 ## Evidence, security & compliance
 
-| Capability | SignFlow | Acrobat Sign | Zoho Sign |
+| Capability | ShalaSign | Acrobat Sign | Zoho Sign |
 |---|---|---|---|
 | Certificate of Completion appended to the PDF | ✅ | ✅ | ✅ |
 | Full audit trail (IP, device, timestamps, every event) | ✅ sender copy; signer copy omits log | ✅ | ✅ |
@@ -82,7 +82,7 @@ October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/
 
 ## Integrations & automation
 
-| Capability | SignFlow | Acrobat Sign | Zoho Sign |
+| Capability | ShalaSign | Acrobat Sign | Zoho Sign |
 |---|---|---|---|
 | REST API with API keys | ✅ same endpoints the app uses | ✅ 💰 | ✅ 💰 |
 | Webhooks (sent, completed, declined, voided, expired), HMAC-signed, retried | ✅ | ✅ | ✅ |
@@ -104,13 +104,13 @@ October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/
 
 ## Pricing & deployment
 
-| | SignFlow | Acrobat Sign | Zoho Sign |
+| | ShalaSign | Acrobat Sign | Zoho Sign |
 |---|---|---|---|
 | Cost | Hosting only (~US$7/month Render Starter, or a free Oracle VM) for unlimited users and envelopes | Per user per month; enterprise features on higher tiers | ~US$10–22 per user per month depending on tier (reviews differ) |
 | Where data lives | Your disk, encrypted with your key; optional copy to your Microsoft 365 | Adobe cloud | Zoho cloud |
 | Support | Your team / this repository | Vendor support | Vendor support |
 
-## What the vendors do that SignFlow should add next
+## What the vendors do that ShalaSign should add next
 
 In rough order of value for a company-internal deployment:
 
@@ -122,7 +122,7 @@ In rough order of value for a company-internal deployment:
 6. **Localisation** of the signing page (Hindi and other Indian languages).
 7. **DOCX and image upload** converted to PDF on the server.
 
-## Where SignFlow is ahead
+## Where ShalaSign is ahead
 
 - **Ownership.** Documents, signatures and ID uploads stay on infrastructure you control, encrypted with a key only you hold, and are mirrored into your own Microsoft 365 tenant organised per sender.
 - **Cost.** No per-user or per-envelope pricing; bulk send and templates are not gated behind an enterprise tier.

@@ -119,7 +119,7 @@ export default function Dashboard() {
           <form className="card tight" onSubmit={askSend} style={{ background: '#f7faff', borderColor: '#c9dafb' }}>
             <div className="row" style={{ gap: 8 }}>
               <span style={{ fontSize: 18 }}>✨</span>
-              <input value={ask.text} onChange={(e) => setAsk({ ...ask, text: e.target.value })} placeholder='Tell SignFlow what to do, e.g. "Send the NDA template to asha@acme.com, company Acme" — or attach a PDF and say who signs' style={{ flex: 1, minWidth: 220 }} />
+              <input value={ask.text} onChange={(e) => setAsk({ ...ask, text: e.target.value })} placeholder='Tell ShalaSign what to do, e.g. "Send the NDA template to asha@acme.com, company Acme" — or attach a PDF and say who signs' style={{ flex: 1, minWidth: 220 }} />
               <input ref={askFileRef} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={(e) => setAsk({ ...ask, file: e.target.files?.[0] || null })} />
               <button type="button" className="secondary" onClick={() => askFileRef.current.click()}>{ask.file ? `📎 ${ask.file.name.slice(0, 18)}${ask.file.name.length > 18 ? '…' : ''}` : '📎 Attach PDF'}</button>
               <button disabled={uploading || (!ask.text.trim() && !ask.file)}>{uploading ? 'Uploading…' : 'Go'}</button>

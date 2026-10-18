@@ -1,5 +1,5 @@
-// The actions Claude can take in SignFlow — shared by the MCP server (Claude
-// outside the app) and the in-app assistant. Every tool calls SignFlow's own
+// The actions Claude can take in ShalaSign — shared by the MCP server (Claude
+// outside the app) and the in-app assistant. Every tool calls ShalaSign's own
 // REST API over loopback with the caller's credentials, so permissions,
 // validation and audit trail are identical to clicking in the UI.
 import { z } from 'zod';
@@ -16,7 +16,7 @@ async function api(ctx, path, { method = 'GET', body, formData } = {}) {
   });
   const text = await r.text();
   let data; try { data = text ? JSON.parse(text) : null; } catch { data = { error: text.slice(0, 300) }; }
-  if (!r.ok) throw new Error(data?.error || `SignFlow API ${method} ${path} failed (${r.status})`);
+  if (!r.ok) throw new Error(data?.error || `ShalaSign API ${method} ${path} failed (${r.status})`);
   return data;
 }
 

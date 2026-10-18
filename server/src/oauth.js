@@ -1,7 +1,7 @@
 // Minimal OAuth 2.1 authorization server so claude.ai (and any MCP client)
-// can connect with "Sign in with SignFlow": discovery metadata, dynamic
+// can connect with "Sign in with ShalaSign": discovery metadata, dynamic
 // client registration, PKCE authorization code with a consent screen, and
-// refreshable bearer tokens that map to a SignFlow user.
+// refreshable bearer tokens that map to a ShalaSign user.
 import crypto from 'crypto';
 import { nanoid } from 'nanoid';
 import db from './db.js';
@@ -12,14 +12,14 @@ import { nowSql } from './util.js';
 const ACCESS_TTL_S = 60 * 60;            // 1 hour
 const REFRESH_TTL_S = 30 * 24 * 60 * 60; // 30 days
 const CODE_TTL_S = 10 * 60;
-const SCOPES = ['signflow'];
+const SCOPES = ['shalasign'];
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const b64url = (b) => Buffer.from(b).toString('base64url');
 const validRedirect = (u) => { try { const x = new URL(u); return (x.protocol === 'https:' || x.hostname === 'localhost' || x.hostname === '127.0.0.1' || x.protocol.endsWith(':') && !/^https?:$/.test(x.protocol)) && !x.hash; } catch { return false; } };
 
 export function registerOAuthRoutes(app) {
   // ---- discovery ----
-  const resourceMeta = (_req, res) => res.json({ resource: `${appUrl()}/mcp`, authorization_servers: [appUrl()], bearer_methods_supported: ['header'], scopes_supported: SCOPES, resource_name: 'SignFlow' });
+  const resourceMeta = (_req, res) => res.json({ resource: `${appUrl()}/mcp`, authorization_servers: [appUrl()], bearer_methods_supported: ['header'], scopes_supported: SCOPES, resource_name: 'ShalaSign' });
   app.get('/.well-known/oauth-protected-resource', resourceMeta);
   app.get('/.well-known/oauth-protected-resource/mcp', resourceMeta);
   app.get('/.well-known/oauth-authorization-server', (_req, res) => res.json({
@@ -58,7 +58,7 @@ export function registerOAuthRoutes(app) {
     const back = (params) => res.redirect(`${redirectUri}${redirectUri.includes('?') ? '&' : '?'}${new URLSearchParams({ ...(q.state ? { state: String(q.state) } : {}), ...params })}`);
     if (q.response_type !== 'code') return back({ error: 'unsupported_response_type' });
     if (!q.code_challenge || (q.code_challenge_method || 'plain') !== 'S256') return back({ error: 'invalid_request', error_description: 'PKCE S256 code_challenge is required' });
-    const consentUrl = `/oauth/consent?${new URLSearchParams({ client_id: client.id, redirect_uri: redirectUri, state: String(q.state || ''), code_challenge: String(q.code_challenge), scope: String(q.scope || 'signflow'), resource: String(q.resource || '') })}`;
+    const consentUrl = `/oauth/consent?${new URLSearchParams({ client_id: client.id, redirect_uri: redirectUri, state: String(q.state || ''), code_challenge: String(q.code_challenge), scope: String(q.scope || 'shalasign'), resource: String(q.resource || '') })}`;
     if (!currentUser(req)) return res.redirect(`/login?next=${encodeURIComponent(consentUrl)}`);
     res.redirect(consentUrl);
   });
@@ -81,7 +81,7 @@ export function registerOAuthRoutes(app) {
     if (!b.code_challenge) return res.status(400).json({ error: 'code_challenge missing' });
     const code = `sfac_${nanoid(40)}`;
     db.prepare(`INSERT INTO oauth_codes (code_hash, client_id, user_id, redirect_uri, code_challenge, scope, resource, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(sha(code), client.id, req.user.id, String(b.redirect_uri), String(b.code_challenge), String(b.scope || 'signflow'), String(b.resource || ''), nowSql(new Date(Date.now() + CODE_TTL_S * 1000)));
+      .run(sha(code), client.id, req.user.id, String(b.redirect_uri), String(b.code_challenge), String(b.scope || 'shalasign'), String(b.resource || ''), nowSql(new Date(Date.now() + CODE_TTL_S * 1000)));
     url.searchParams.set('code', code);
     res.json({ redirect: url.toString() });
   });

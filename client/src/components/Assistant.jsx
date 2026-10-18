@@ -3,7 +3,7 @@ import { api } from '../api.js';
 
 const KEY = 'signflow.assistant.v1';
 
-/** Floating "Ask SignFlow" chat powered by Claude with the SignFlow tools. */
+/** Floating "Ask ShalaSign" chat powered by Claude with the ShalaSign tools. */
 export default function Assistant() {
   const [status, setStatus] = useState(null);
   const [open, setOpen] = useState(false);
@@ -42,11 +42,11 @@ export default function Assistant() {
 
   return (
     <>
-      <button className="assistant-fab" onClick={() => setOpen(!open)} aria-label="Ask SignFlow assistant" title="Ask SignFlow">✨ Ask</button>
+      <button className="assistant-fab" onClick={() => setOpen(!open)} aria-label="Ask ShalaSign assistant" title="Ask ShalaSign">✨ Ask</button>
       {open && (
-        <div className="assistant-panel" role="dialog" aria-label="SignFlow assistant">
+        <div className="assistant-panel" role="dialog" aria-label="ShalaSign assistant">
           <div className="assistant-head">
-            <strong>✨ SignFlow assistant</strong>
+            <strong>✨ ShalaSign assistant</strong>
             <span className="muted small">{status.enabled ? `acts as you · ${status.source === 'workspace' ? 'workspace key' : status.source === 'user' ? 'your key' : 'shared key'} ${status.hint || ''}` : 'not connected'}</span>
             <span style={{ marginLeft: 'auto' }} className="row">
               {thread.turns.length > 0 && <button className="ghost small" onClick={reset} title="New conversation">New</button>}
@@ -57,7 +57,7 @@ export default function Assistant() {
             {!status.enabled && (
               <div className="notice warn" style={{ margin: 0 }}>
                 <strong>Connect your Anthropic account to use the assistant.</strong><br />
-                Usage is billed to your own Anthropic account, not to SignFlow. Add your API key in <a href="/settings?tab=claude">Settings → Claude &amp; MCP</a>.
+                Usage is billed to your own Anthropic account, not to ShalaSign. Add your API key in <a href="/settings?tab=claude">Settings → Claude &amp; MCP</a>.
                 {status.is_admin && <><br />As a workspace admin you can also add one key for your whole team there.</>}
               </div>
             )}

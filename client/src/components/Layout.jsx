@@ -20,7 +20,7 @@ export default function Layout({ children, wide = false, subtitle }) {
   return (
     <>
       <div className="topbar">
-        <Link className="logo" to="/">✒️ SignFlow</Link>
+        <Link className="logo" to="/">✒️ ShalaSign</Link>
         <nav className="nav hide-mobile">
           <NavLink to="/" end>Documents</NavLink>
           <NavLink to="/templates">Templates</NavLink>
