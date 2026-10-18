@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
-    <fullName>ShalaSign_Id__c</fullName>
-    <label>ShalaSign Id</label>
-    <type>Text</type>
-    <length>40</length><externalId>true</externalId><unique>true</unique><caseSensitive>true</caseSensitive><required>true</required>
-    <description>Envelope id in ShalaSign</description>
-</CustomField>

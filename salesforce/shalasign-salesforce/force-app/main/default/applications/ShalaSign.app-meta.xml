@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<CustomApplication xmlns="http://soap.sforce.com/2006/04/metadata">
-    <label>ShalaSign</label><description>E-signature from Salesforce with ShalaSign.</description>
-    <formFactors>Large</formFactors><formFactors>Small</formFactors>
-    <isNavAutoTempTabsDisabled>false</isNavAutoTempTabsDisabled><isNavPersonalizationDisabled>false</isNavPersonalizationDisabled>
-    <navType>Standard</navType><uiType>Lightning</uiType>
-    <tabs>ShalaSign_Setup</tabs><tabs>ShalaSign_Envelope__c</tabs><tabs>standard-Account</tabs><tabs>standard-Contact</tabs><tabs>standard-Opportunity</tabs>
-</CustomApplication>

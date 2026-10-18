@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
-    <fullName>Signer_Contact_Field__c</fullName>
-    <label>Signer contact field</label>
-    <type>Text</type>
-    <length>120</length><required>false</required><unique>false</unique><externalId>false</externalId>
-    <description>Lookup field on the object that holds the signer Contact, e.g. ContactId on Case.</description>
-</CustomField>

@@ -285,8 +285,9 @@ From Account, Contact, Opportunity or any Flow you can **Send with ShalaSign**
 envelope on the record, remind or void, and get the signed PDF attached as a
 File when complete. Envelopes carry the Salesforce record id as an external
 reference (`external_system`, `external_id`, `external_url`) that the API can
-filter on. Source, test instructions and the AppExchange publishing checklist
-are in [salesforce/README.md](salesforce/README.md).
+filter on. The package is its own Salesforce DX project at
+[github.com/softshala/shalasign-salesforce](https://github.com/softshala/shalasign-salesforce)
+(source, tests and the AppExchange publishing checklist).
 
 ## Project layout
 
@@ -322,8 +323,7 @@ client/src/
   pages/        – Dashboard, Prepare, SignPage, EnvelopeDetail, Templates, Settings, AuthPage
   components/   – PdfViewer (responsive), SignatureModal (draw/type/upload/saved), Layout, Toast
 salesforce/
-  shalasign-salesforce/ – Salesforce managed package (Apex, LWC, objects, tests)
-  README.md     – install, test and AppExchange publishing steps
+  README.md     – pointer to the Salesforce package repo (softshala/shalasign-salesforce)
 ```
 
 ## Deployment
