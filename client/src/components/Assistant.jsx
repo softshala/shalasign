@@ -15,7 +15,7 @@ export default function Assistant() {
   useEffect(() => { api('/api/assistant/status').then(setStatus).catch(() => setStatus({ enabled: false })); }, []);
   useEffect(() => { try { sessionStorage.setItem(KEY, JSON.stringify(thread)); } catch { /* ignore */ } endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [thread, open]);
 
-  if (!status?.enabled) return null;
+  if (!status) return null;
 
   const send = async (e) => {
     e?.preventDefault();
@@ -40,14 +40,21 @@ export default function Assistant() {
         <div className="assistant-panel" role="dialog" aria-label="SignFlow assistant">
           <div className="assistant-head">
             <strong>✨ SignFlow assistant</strong>
-            <span className="muted small">acts as you · everything is audited</span>
+            <span className="muted small">{status.enabled ? `acts as you · ${status.source === 'workspace' ? 'workspace key' : status.source === 'user' ? 'your key' : 'shared key'} ${status.hint || ''}` : 'not connected'}</span>
             <span style={{ marginLeft: 'auto' }} className="row">
               {thread.turns.length > 0 && <button className="ghost small" onClick={reset} title="New conversation">New</button>}
               <button className="ghost small" onClick={() => setOpen(false)} aria-label="Close">✕</button>
             </span>
           </div>
           <div className="assistant-body">
-            {thread.turns.length === 0 && (
+            {!status.enabled && (
+              <div className="notice warn" style={{ margin: 0 }}>
+                <strong>Connect your Anthropic account to use the assistant.</strong><br />
+                Usage is billed to your own Anthropic account, not to SignFlow. Add your API key in <a href="/settings?tab=claude">Settings → Claude &amp; MCP</a>.
+                {status.is_admin && <><br />As a workspace admin you can also add one key for your whole team there.</>}
+              </div>
+            )}
+            {status.enabled && thread.turns.length === 0 && (
               <div className="muted" style={{ fontSize: 13 }}>
                 <p style={{ marginTop: 0 }}>Ask in plain words. I can look up documents, send templates, upload and send PDFs, remind signers, void, and explain your setup.</p>
                 <div className="stack" style={{ gap: 6 }}>{suggestions.map((s) => <button key={s} className="secondary small" style={{ justifyContent: 'flex-start', whiteSpace: 'normal', textAlign: 'left' }} onClick={() => setInput(s)}>{s}</button>)}</div>
@@ -67,8 +74,8 @@ export default function Assistant() {
             <div ref={endRef} />
           </div>
           <form className="assistant-input" onSubmit={send}>
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="e.g. Send the NDA template to asha@acme.com, company Acme" disabled={busy} autoFocus />
-            <button disabled={busy || !input.trim()}>Send</button>
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={status.enabled ? 'e.g. Send the NDA template to asha@acme.com, company Acme' : 'Add your Anthropic API key in Settings first'} disabled={busy || !status.enabled} autoFocus />
+            <button disabled={busy || !input.trim() || !status.enabled}>Send</button>
           </form>
         </div>
       )}

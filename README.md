@@ -252,9 +252,12 @@ acting as the connected user, with every action in the audit trail.
 - **Claude Desktop**: via `mcp-remote` with the same header (snippet in the app).
 
 The **in-app assistant** (✨ Ask, bottom right) runs Claude with the same tools
-on the server, as the logged-in user. Enable it by setting `ANTHROPIC_API_KEY`
-(optionally `ASSISTANT_MODEL`, default `claude-opus-5-5`). Destructive actions
-such as voiding require an explicit confirmation from the user.
+on the server, as the logged-in user. It uses **the user's own Anthropic API
+key** (Settings → Claude & MCP; stored encrypted, verified before saving) or a
+**workspace key** an admin sets for the whole team, so customers pay for their
+own usage. The operator's key is used only with `ASSISTANT_SHARED_KEY=1`.
+Model: `ASSISTANT_MODEL` (default `claude-opus-5-5`). Destructive actions such
+as voiding require an explicit confirmation from the user.
 
 Tools: `list_documents`, `get_document`, `get_stats`, `list_templates`,
 `send_from_template`, `create_document`, `send_document`, `remind_signers`,

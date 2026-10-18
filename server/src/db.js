@@ -343,7 +343,9 @@ addColumn('users', "role TEXT NOT NULL DEFAULT 'member'");          // owner | a
 addColumn('envelopes', 'org_id TEXT');
 addColumn('templates', 'org_id TEXT');
 addColumn('folders', 'org_id TEXT');
-for (const def of ['mail_connection_id TEXT', 'archive_connection_id TEXT', 'archive_root_id TEXT', 'archive_root_path TEXT']) addColumn('user_settings', def);
+for (const def of ['mail_connection_id TEXT', 'archive_connection_id TEXT', 'archive_root_id TEXT', 'archive_root_path TEXT', 'anthropic_key TEXT', 'anthropic_key_hint TEXT']) addColumn('user_settings', def);
+addColumn('orgs', 'anthropic_key TEXT');          // encrypted; optional workspace-wide key set by an admin
+addColumn('orgs', 'anthropic_key_hint TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS idx_env_org ON envelopes(org_id)');
 
 // Every existing user gets a personal workspace once (migration for pre-org databases).

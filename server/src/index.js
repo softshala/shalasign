@@ -16,7 +16,7 @@ import { registerConnectionRoutes } from './connections.js';
 import { registerOrgRoutes } from './orgs.js';
 import { registerOAuthRoutes, userForAccessToken } from './oauth.js';
 import { registerMcpRoutes } from './mcp.js';
-import { registerAssistantRoutes, assistantEnabled } from './assistant.js';
+import { registerAssistantRoutes } from './assistant.js';
 import { setOAuthLookup } from './auth.js';
 import { startScheduler } from './scheduler.js';
 
@@ -59,7 +59,7 @@ app.get('/api/health', (_req, res) => {
     encryption_key_source: process.env.SIGNFLOW_SECRET ? 'env' : 'file-in-storage-dir',
     email_configured: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
     connect_providers: { microsoft: !!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET), google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) },
-    assistant_enabled: assistantEnabled(),
+    assistant_platform_key_shared: process.env.ASSISTANT_SHARED_KEY === '1' && !!process.env.ANTHROPIC_API_KEY,
     mcp_url: `${process.env.APP_URL || 'http://localhost:' + (process.env.PORT || 4000)}/mcp`,
     warnings: [
       ...(!persistent ? ['Storage is NOT a persistent disk: accounts, documents and sessions are erased on every deploy/restart. Attach a disk and set STORAGE_DIR to its mount path.'] : []),

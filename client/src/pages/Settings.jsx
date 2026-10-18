@@ -291,12 +291,18 @@ function Workspace() {
 function ClaudeTab() {
   const [status, setStatus] = useState(null);
   const [grants, setGrants] = useState([]);
-  const [settings, setSettings] = useState(null);
   const [newKey, setNewKey] = useState(null);
+  const [akey, setAkey] = useState(''); const [wkey, setWkey] = useState(''); const [saving, setSaving] = useState('');
   const toast = useToast();
   const origin = window.location.origin;
   const mcpUrl = `${origin}/mcp`;
-  const load = () => { api('/api/assistant/status').then(setStatus).catch(() => setStatus({ enabled: false, tools: [] })); api('/api/oauth/grants').then(setGrants).catch(() => {}); api('/api/settings').then(setSettings).catch(() => {}); };
+  const load = () => { api('/api/assistant/status').then(setStatus).catch(() => setStatus({ enabled: false, tools: [] })); api('/api/oauth/grants').then(setGrants).catch(() => {}); };
+  const saveKey = async (scope) => {
+    const key = scope === 'workspace' ? wkey : akey; setSaving(scope);
+    try { await api(scope === 'workspace' ? '/api/assistant/workspace-key' : '/api/assistant/key', { method: 'PUT', body: { key: key.trim() } }); toast('Key verified and saved'); setAkey(''); setWkey(''); load(); }
+    catch (e) { toast(e.message, { bad: true, ms: 7000 }); } finally { setSaving(''); }
+  };
+  const removeKey = async (scope) => { if (!confirm('Remove this key?')) return; await api(scope === 'workspace' ? '/api/assistant/workspace-key' : '/api/assistant/key', { method: 'DELETE' }); toast('Key removed'); load(); };
   useEffect(() => { load(); }, []);
   const createKey = async () => { try { const k = await api('/api/settings/api-keys', { method: 'POST', body: { name: 'Claude Desktop / Code' } }); setNewKey(k); load(); } catch (e) { toast(e.message, { bad: true }); } };
   const revoke = async (g) => { if (!confirm(`Disconnect ${g.name}?`)) return; await api(`/api/oauth/grants/${g.client_id}`, { method: 'DELETE' }); load(); toast('Disconnected'); };
@@ -331,10 +337,29 @@ function ClaudeTab() {
         </div>
       </div>
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>In-app assistant</h3>
-        {status?.enabled
-          ? <p className="muted" style={{ marginTop: 0 }}>Enabled (model {status.model}). Click <strong>✨ Ask</strong> at the bottom right of any page. Tools available: {status.tools.join(', ')}.</p>
-          : <p className="notice warn" style={{ marginTop: 0 }}>Not enabled on this server. The operator sets <code>ANTHROPIC_API_KEY</code> (and optionally <code>ASSISTANT_MODEL</code>) in the hosting environment to turn it on for everyone.</p>}
+        <h3 style={{ marginTop: 0 }}>In-app assistant (✨ Ask)</h3>
+        <p className="muted" style={{ marginTop: 0 }}>The assistant runs Claude ({status?.model}) on <strong>your own Anthropic account</strong>, so usage is billed to you, not to SignFlow. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com → API keys</a> (a few cents per request is typical). Prefer not to? Use SignFlow from Claude via the connector above instead — your Claude subscription covers that.</p>
+        {status?.enabled && <p className="notice ok">Active using {status.source === 'workspace' ? 'the workspace key' : status.source === 'user' ? 'your key' : 'the shared platform key'} {status.hint || ''}.</p>}
+        <div className="grid-2">
+          <div>
+            <h4 style={{ margin: '0 0 6px' }}>Your key</h4>
+            {status?.has_own_key
+              ? <div className="row"><code>sk-ant-{status.own_hint}</code><button className="ghost small" onClick={() => removeKey('user')}>Remove</button></div>
+              : <div className="row"><input type="password" placeholder="sk-ant-…" value={akey} onChange={(e) => setAkey(e.target.value)} style={{ flex: 1 }} autoComplete="off" /><button className="small" disabled={!akey.trim() || saving === 'user'} onClick={() => saveKey('user')}>{saving === 'user' ? 'Verifying…' : 'Save'}</button></div>}
+            <div className="hint">Stored encrypted. Verified with Anthropic before saving. Never shown again.</div>
+          </div>
+          {status?.is_admin && (
+            <div>
+              <h4 style={{ margin: '0 0 6px' }}>Workspace key <span className="muted" style={{ fontWeight: 400 }}>(admins)</span></h4>
+              {status?.workspace_key
+                ? <div className="row"><code>sk-ant-{status.workspace_hint}</code><button className="ghost small" onClick={() => removeKey('workspace')}>Remove</button></div>
+                : <div className="row"><input type="password" placeholder="sk-ant-…" value={wkey} onChange={(e) => setWkey(e.target.value)} style={{ flex: 1 }} autoComplete="off" /><button className="small" disabled={!wkey.trim() || saving === 'workspace'} onClick={() => saveKey('workspace')}>{saving === 'workspace' ? 'Verifying…' : 'Save'}</button></div>}
+              <div className="hint">One key for every member of the workspace; it takes precedence over personal keys. Set a spend limit on it in the Anthropic console.</div>
+            </div>
+          )}
+          {!status?.is_admin && status?.workspace_key && <div><h4 style={{ margin: '0 0 6px' }}>Workspace key</h4><p className="muted small">Your admin has set a workspace key, so you don't need your own.</p></div>}
+        </div>
+        {status?.enabled && <p className="muted small" style={{ marginTop: 10 }}>Tools: {status.tools.join(', ')}.</p>}
       </div>
     </>
   );
