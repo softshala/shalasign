@@ -84,8 +84,12 @@ October 2026 from the vendors' own feature pages ([Adobe](https://www.adobe.com/
 |---|---|---|---|
 | REST API with API keys | ✅ same endpoints the app uses | ✅ 💰 | ✅ 💰 |
 | Webhooks (sent, completed, declined, voided, expired), HMAC-signed, retried | ✅ | ✅ | ✅ |
-| Automatic archive to OneDrive / SharePoint | ✅ per-sender folders, auto-shared | 🟡 via integrations | ✅ "cloud backup" |
-| Archive to Google Drive / Dropbox / Box | ❌ | ✅ | ✅ |
+| Send from the user's own inbox (Outlook / Gmail) | ✅ one-click connect | 🟡 platform sender, custom From needs setup | 🟡 platform sender |
+| Automatic archive to OneDrive | ✅ user picks folder; or shared workspace folder | 🟡 via integrations | ✅ "cloud backup" |
+| Archive to Google Drive | ✅ user picks folder | ✅ | ✅ |
+| Archive to Dropbox / Box | ❌ | ✅ | ✅ |
+| Team workspaces, roles, invitations | ✅ owner/admin/member | ✅ | ✅ |
+| Admin choice: shared inbox / shared drive for the team | ✅ | 🟡 | 🟡 |
 | CRM / HR integrations (Salesforce, Zoho CRM, Workday…) | ❌ build on API/webhooks | ✅ | ✅ Zoho suite |
 | Microsoft 365 add-ins | ❌ | ✅ | ✅ |
 | Zapier / Power Automate connectors | 🟡 via webhook + API | ✅ | ✅ |

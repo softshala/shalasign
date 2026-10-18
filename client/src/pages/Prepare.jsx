@@ -140,12 +140,12 @@ export default function Prepare() {
       if (bulk) {
         if (!parsedRecipients.length) return setError('Add at least one recipient (Name, email per line).');
         const d = await api(`/api/envelopes/${id}/bulk-send`, { method: 'POST', body: { ...common, recipients: parsedRecipients, attachments: bulkAttachments, message: opts.message } });
-        setLinks({ emailed: d.emailed, list: d.links, bulk: true, count: d.count });
+        setLinks({ emailed: d.emailed, via: d.email_via, account: d.email_account, list: d.links, bulk: true, count: d.count });
       } else {
         const missing = signers.findIndex((s) => !s.name.trim() || !s.email.trim());
         if (missing >= 0) return setError(`Signer ${missing + 1} needs a name and an email.`);
         const d = await api(`/api/envelopes/${id}/send`, { method: 'POST', body: { ...common, signers, sequential: opts.sequential, cc: opts.cc, title, message: opts.message } });
-        setLinks({ emailed: d.emailed, list: d.links });
+        setLinks({ emailed: d.emailed, via: d.email_via, account: d.email_account, list: d.links });
       }
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
@@ -169,8 +169,9 @@ export default function Prepare() {
           <p className="muted">
             {links.emailed
               ? (opts.sequential && !links.bulk && links.list.length > 1 ? 'The first signer has been emailed. Each next signer is emailed when their turn comes. Links are listed here as a backup:' : 'Each recipient has been emailed their own signing link. The links are also listed here as a backup:')
-              : 'Email is not configured on this server, so share these links directly (each one is private to that signer):'}
+              : 'No email route is set up yet, so share these links directly (each one is private to that signer). To send automatically, connect your inbox in Settings → Connected accounts.'}
           </p>
+          {links.emailed && links.account && <p className="muted small">Emails were sent from <strong>{links.account}</strong>{links.via === 'platform' ? ' (the SignFlow sender; replies come to you)' : links.via === 'microsoft' ? ' via your Microsoft 365 inbox' : links.via === 'google' ? ' via your Gmail' : ''}.</p>}
           {links.list.slice(0, 50).map((l) => (
             <div key={l.signing_url} style={{ marginBottom: 12 }}>
               <strong>{l.name}</strong> <span className="muted">({l.email})</span>

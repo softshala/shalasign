@@ -7,11 +7,12 @@ import db, { audit, STORAGE_DIR, tx, getSettings } from './db.js';
 import { requireAuth } from './auth.js';
 import { sha256, validatePdf } from './pdf.js';
 import { writeEncrypted, readDecrypted } from './crypto.js';
-import { appUrl, mailEnabled } from './mailer.js';
+import { appUrl, mailEnabled, mailRouteFor } from './mailer.js';
 import { normalizeFields } from './fields.js';
 import { getEnvelope, getSigners, isSignerTurn, notifyPendingSigners, sendSignRequestTo, sealAndNotify, envelopePayload } from './complete.js';
 import { queueWebhook } from './webhooks.js';
-import { archiveEnvelope, oneDriveEnabled, oneDriveTarget } from './onedrive.js';
+import { archiveEnvelope, archiveEnabledFor, archiveTargetLabel } from './storage.js';
+import { findEnvelope, envelopeScope, canEdit } from './scope.js';
 import { actorOf, addDays, clampInt, clientIp, nowSql, safeFilename, validEmail } from './util.js';
 
 const UPLOADS = path.join(STORAGE_DIR, 'uploads');
@@ -24,7 +25,14 @@ const upload = multer({
     (file.mimetype === 'application/pdf' || /\.pdf$/i.test(file.originalname)) ? cb(null, true) : cb(new Error('Only PDF files are accepted')),
 });
 
-const ownEnvelope = (req) => db.prepare(`SELECT * FROM envelopes WHERE id = ? AND user_id = ?`).get(req.params.id, req.user.id);
+const ownEnvelope = (req) => findEnvelope(req.user, req.params.id);
+// For mutations: visible AND editable (sender or workspace admin). Sends the error itself.
+const ownEditable = (req, res) => {
+  const env = findEnvelope(req.user, req.params.id);
+  if (!env) { res.status(404).json({ error: 'Not found' }); return null; }
+  if (!canEdit(req.user, env)) { res.status(403).json({ error: 'Only the sender or a workspace admin can change this document' }); return null; }
+  return env;
+};
 const parseJson = (s, dflt) => { try { return JSON.parse(s ?? ''); } catch { return dflt; } };
 
 function cleanSigners(input, { max = 10 } = {}) {
@@ -54,7 +62,7 @@ function cleanCc(input) {
 
 function resolveFolder(req, folderId) {
   if (!folderId) return null;
-  const f = db.prepare(`SELECT id FROM folders WHERE id = ? AND user_id = ?`).get(folderId, req.user.id);
+  const f = db.prepare(`SELECT id FROM folders WHERE id = ? AND org_id = ?`).get(folderId, req.user.org_id);
   if (!f) throw new Error('Unknown folder');
   return f.id;
 }
@@ -95,8 +103,8 @@ export function registerEnvelopeRoutes(app) {
     const hash = sha256(bytes);
     writeEncrypted(req.file.path, bytes);
     const title = String(req.body.title || req.file.originalname.replace(/\.pdf$/i, '')).trim().slice(0, 200) || 'Document';
-    db.prepare(`INSERT INTO envelopes (id, user_id, title, message, original_pdf, sha256_original, page_count) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, req.user.id, title, String(req.body.message || '').slice(0, 2000), req.file.path, hash, info.pages);
+    db.prepare(`INSERT INTO envelopes (id, user_id, org_id, title, message, original_pdf, sha256_original, page_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, req.user.id, req.user.org_id, title, String(req.body.message || '').slice(0, 2000), req.file.path, hash, info.pages);
     audit(id, 'envelope.created', actorOf(req.user), `Uploaded "${req.file.originalname}" (${bytes.length} bytes, ${info.pages} page(s), sha256 ${hash.slice(0, 16)}…)`, clientIp(req));
     res.json({ id, sha256: hash, pages: info.pages, title });
   });
@@ -106,8 +114,9 @@ export function registerEnvelopeRoutes(app) {
     const { q = '', status = '', folder = 'all', sort = 'created_desc' } = req.query;
     const limit = clampInt(req.query.limit, 1, 200, 50);
     const offset = clampInt(req.query.offset, 0, 1e9, 0);
-    const where = ['e.user_id = ?'];
-    const params = [req.user.id];
+    const scope = envelopeScope(req.user);
+    const where = [scope.sql];
+    const params = [...scope.params];
     if (status && status !== 'all') {
       if (status === 'active') { where.push(`e.status = 'sent'`); }
       else { where.push('e.status = ?'); params.push(String(status)); }
@@ -123,22 +132,22 @@ export function registerEnvelopeRoutes(app) {
     const total = db.prepare(`SELECT COUNT(*) n FROM envelopes e WHERE ${where.join(' AND ')}`).get(...params).n;
     const rows = db.prepare(`
       SELECT e.id, e.title, e.status, e.folder_id, e.created_at, e.sent_at, e.completed_at, e.expires_at, e.seal_error, e.archive_url, e.template_id, e.page_count,
-             f.name AS folder_name,
+             f.name AS folder_name, u.name AS owner_name, (e.user_id = ?) AS mine,
              (SELECT COUNT(*) FROM signers s WHERE s.envelope_id = e.id) AS signers_total,
              (SELECT COUNT(*) FROM signers s WHERE s.envelope_id = e.id AND s.status = 'signed') AS signers_signed,
              (SELECT GROUP_CONCAT(s.name, ', ') FROM signers s WHERE s.envelope_id = e.id) AS signer_names,
              (SELECT s.name FROM signers s WHERE s.envelope_id = e.id AND s.status = 'pending' ORDER BY s.order_index LIMIT 1) AS waiting_on
-      FROM envelopes e LEFT JOIN folders f ON f.id = e.folder_id
-      WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...params, limit, offset);
-    res.json({ items: rows, total, limit, offset });
+      FROM envelopes e LEFT JOIN folders f ON f.id = e.folder_id LEFT JOIN users u ON u.id = e.user_id
+      WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`).all(req.user.id, ...params, limit, offset);
+    res.json({ items: rows.map((r) => ({ ...r, mine: !!r.mine })), total, limit, offset, shows_workspace: scope.sql.startsWith('e.org_id') });
   });
 
   app.get('/api/envelopes/stats', requireAuth, (req, res) => {
-    const by = Object.fromEntries(db.prepare(`SELECT status, COUNT(*) n FROM envelopes WHERE user_id = ? GROUP BY status`).all(req.user.id).map((r) => [r.status, r.n]));
-    const month = db.prepare(`SELECT COUNT(*) n FROM envelopes WHERE user_id = ? AND status = 'completed' AND completed_at >= datetime('now', '-30 days')`).get(req.user.id).n;
-    const avg = db.prepare(`SELECT AVG((julianday(completed_at) - julianday(COALESCE(sent_at, created_at))) * 24) h FROM envelopes WHERE user_id = ? AND status = 'completed' AND completed_at IS NOT NULL`).get(req.user.id).h;
-    const expiringSoon = db.prepare(`SELECT COUNT(*) n FROM envelopes WHERE user_id = ? AND status = 'sent' AND expires_at IS NOT NULL AND expires_at <= datetime('now', '+3 days')`).get(req.user.id).n;
-    const templates = db.prepare(`SELECT COUNT(*) n FROM templates WHERE user_id = ?`).get(req.user.id).n;
+    const by = Object.fromEntries(db.prepare(`SELECT status, COUNT(*) n FROM envelopes WHERE ${W} GROUP BY status`).all(...P).map((r) => [r.status, r.n]));
+    const month = db.prepare(`SELECT COUNT(*) n FROM envelopes WHERE ${W} AND status = 'completed' AND completed_at >= datetime('now', '-30 days')`).get(...P).n;
+    const avg = db.prepare(`SELECT AVG((julianday(completed_at) - julianday(COALESCE(sent_at, created_at))) * 24) h FROM envelopes WHERE ${W} AND status = 'completed' AND completed_at IS NOT NULL`).get(...P).h;
+    const expiringSoon = db.prepare(`SELECT COUNT(*) n FROM envelopes WHERE ${W} AND status = 'sent' AND expires_at IS NOT NULL AND expires_at <= datetime('now', '+3 days')`).get(...P).n;
+    const templates = db.prepare(`SELECT COUNT(*) n FROM templates WHERE org_id = ?`).get(req.user.org_id).n;
     res.json({
       draft: by.draft || 0, sent: by.sent || 0, completed: by.completed || 0, voided: by.voided || 0, declined: by.declined || 0, expired: by.expired || 0,
       completed_30d: month, avg_hours_to_complete: avg == null ? null : Math.round(avg * 10) / 10, expiring_soon: expiringSoon, templates,
@@ -148,8 +157,9 @@ export function registerEnvelopeRoutes(app) {
 
   // ---------- Folders ----------
   app.get('/api/folders', requireAuth, (req, res) => {
-    const folders = db.prepare(`SELECT id, name, created_at FROM folders WHERE user_id = ? ORDER BY name`).all(req.user.id);
-    const counts = db.prepare(`SELECT folder_id, COUNT(*) n FROM envelopes WHERE user_id = ? AND folder_id IS NOT NULL GROUP BY folder_id`).all(req.user.id);
+    const folders = db.prepare(`SELECT id, name, created_at FROM folders WHERE org_id = ? ORDER BY name`).all(req.user.org_id);
+    const sc = envelopeScope(req.user);
+    const counts = db.prepare(`SELECT folder_id, COUNT(*) n FROM envelopes e WHERE ${sc.sql} AND folder_id IS NOT NULL GROUP BY folder_id`).all(...sc.params);
     const byFolder = Object.fromEntries(counts.map((c) => [c.folder_id, c.n]));
     res.json(folders.map((f) => ({ ...f, count: byFolder[f.id] || 0 })));
   });
@@ -157,23 +167,23 @@ export function registerEnvelopeRoutes(app) {
     const name = String(req.body?.name || '').trim().slice(0, 60);
     if (!name) return res.status(400).json({ error: 'Folder name is required' });
     const id = nanoid(10);
-    db.prepare(`INSERT INTO folders (id, user_id, name) VALUES (?, ?, ?)`).run(id, req.user.id, name);
+    db.prepare(`INSERT INTO folders (id, user_id, org_id, name) VALUES (?, ?, ?, ?)`).run(id, req.user.id, req.user.org_id, name);
     res.json({ id, name });
   });
   app.patch('/api/folders/:id', requireAuth, (req, res) => {
     const name = String(req.body?.name || '').trim().slice(0, 60);
     if (!name) return res.status(400).json({ error: 'Folder name is required' });
-    db.prepare(`UPDATE folders SET name = ? WHERE id = ? AND user_id = ?`).run(name, req.params.id, req.user.id);
+    db.prepare(`UPDATE folders SET name = ? WHERE id = ? AND org_id = ?`).run(name, req.params.id, req.user.org_id);
     res.json({ ok: true });
   });
   app.delete('/api/folders/:id', requireAuth, (req, res) => {
-    db.prepare(`UPDATE envelopes SET folder_id = NULL WHERE folder_id = ? AND user_id = ?`).run(req.params.id, req.user.id);
-    db.prepare(`DELETE FROM folders WHERE id = ? AND user_id = ?`).run(req.params.id, req.user.id);
+    db.prepare(`UPDATE envelopes SET folder_id = NULL WHERE folder_id = ? AND org_id = ?`).run(req.params.id, req.user.org_id);
+    db.prepare(`DELETE FROM folders WHERE id = ? AND org_id = ?`).run(req.params.id, req.user.org_id);
     res.json({ ok: true });
   });
   app.post('/api/envelopes/:id/folder', requireAuth, (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     let folderId;
     try { folderId = resolveFolder(req, req.body?.folder_id); } catch (e) { return res.status(400).json({ error: e.message }); }
     db.prepare(`UPDATE envelopes SET folder_id = ? WHERE id = ?`).run(folderId, env.id);
@@ -181,9 +191,11 @@ export function registerEnvelopeRoutes(app) {
   });
 
   // ---------- Detail ----------
-  app.get('/api/envelopes/:id', requireAuth, (req, res) => {
+  app.get('/api/envelopes/:id', requireAuth, async (req, res) => {
     const env = ownEnvelope(req);
     if (!env) return res.status(404).json({ error: 'Not found' });
+    const owner = db.prepare(`SELECT name, email FROM users WHERE id = ?`).get(env.user_id);
+    const route = await mailRouteFor(env.user_id);
     const signers = db.prepare(`SELECT id, name, email, order_index, status, token, consent_at, signed_at, declined_at, decline_reason, viewed_at, notified_at, reminders_sent, private_message, ip FROM signers WHERE envelope_id = ? ORDER BY order_index`).all(env.id);
     const fields = db.prepare(`SELECT id, signer_id, type, page, x, y, w, h, label, required, value FROM fields WHERE envelope_id = ?`).all(env.id);
     const events = db.prepare(`SELECT type, actor, detail, ip, created_at FROM audit_events WHERE envelope_id = ? ORDER BY id`).all(env.id);
@@ -200,8 +212,10 @@ export function registerEnvelopeRoutes(app) {
       signers: signers.map((s) => ({ ...s, signing_url: `${appUrl()}/sign/${s.token}`, your_turn: env.status === 'sent' && s.status === 'pending' && isSignerTurn(env, s) })),
       fields, events, attachments,
       can_seal: canSeal,
-      archive_enabled: oneDriveEnabled(), archive_target: oneDriveEnabled() ? oneDriveTarget() : null,
-      mail_enabled: mailEnabled(),
+      can_edit: canEdit(req.user, env),
+      owner: owner ? { name: owner.name, email: owner.email, mine: env.user_id === req.user.id } : null,
+      archive_enabled: archiveEnabledFor(env.user_id), archive_target: archiveTargetLabel(env.user_id),
+      mail_enabled: !!route, mail_route: route ? { via: route.via, account: route.account } : null,
     });
   });
 
@@ -237,8 +251,8 @@ export function registerEnvelopeRoutes(app) {
 
   // ---------- Draft autosave / edit ----------
   app.put('/api/envelopes/:id/draft', requireAuth, (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     if (env.status !== 'draft') return res.status(409).json({ error: `Envelope is ${env.status}` });
     const state = req.body?.state;
     const json = JSON.stringify(state ?? {});
@@ -249,16 +263,16 @@ export function registerEnvelopeRoutes(app) {
   });
 
   app.patch('/api/envelopes/:id', requireAuth, (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 200) : null;
     if (title) db.prepare(`UPDATE envelopes SET title = ? WHERE id = ?`).run(title, env.id);
     res.json({ ok: true });
   });
 
   app.delete('/api/envelopes/:id', requireAuth, (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     if (env.status === 'completed') return res.status(409).json({ error: 'Completed documents are kept as evidence and cannot be deleted' });
     if (env.status === 'sent') return res.status(409).json({ error: 'Void the envelope first, then delete it' });
     tx(() => {
@@ -275,8 +289,8 @@ export function registerEnvelopeRoutes(app) {
 
   // ---------- Send ----------
   app.post('/api/envelopes/:id/send', requireAuth, async (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     if (env.status !== 'draft') return res.status(409).json({ error: `Envelope is already ${env.status}` });
     const settings = getSettings(req.user.id);
     const b = req.body || {};
@@ -304,13 +318,14 @@ export function registerEnvelopeRoutes(app) {
 
     await notifyPendingSigners(env.id);
     queueWebhook(req.user.id, 'envelope.sent', envelopePayload(env.id));
-    res.json({ status: 'sent', emailed: mailEnabled(), links: created.map((s) => ({ name: s.name, email: s.email, signing_url: `${appUrl()}/sign/${s.token}` })) });
+    const route = await mailRouteFor(env.user_id);
+    res.json({ status: 'sent', emailed: !!route, email_via: route?.via || null, email_account: route?.account || null, links: created.map((s) => ({ name: s.name, email: s.email, signing_url: `${appUrl()}/sign/${s.token}` })) });
   });
 
   // Bulk send: one draft + one field layout -> a separate envelope per recipient.
   app.post('/api/envelopes/:id/bulk-send', requireAuth, async (req, res) => {
-    const draft = ownEnvelope(req);
-    if (!draft) return res.status(404).json({ error: 'Not found' });
+    const draft = ownEditable(req, res);
+    if (!draft) return;
     if (draft.status !== 'draft') return res.status(409).json({ error: `Envelope is ${draft.status}` });
     const settings = getSettings(req.user.id);
     const b = req.body || {};
@@ -335,9 +350,9 @@ export function registerEnvelopeRoutes(app) {
       const pdfPath = path.join(UPLOADS, `${eid}.pdf`);
       writeEncrypted(pdfPath, srcBytes);
       tx(() => {
-        db.prepare(`INSERT INTO envelopes (id, user_id, folder_id, access_code, title, message, status, original_pdf, sha256_original, sequential, sent_at, expires_at, reminder_days, page_count)
-                    VALUES (?, ?, ?, ?, ?, ?, 'sent', ?, ?, 1, datetime('now'), ?, ?, ?)`)
-          .run(eid, req.user.id, folderId, code, `${draft.title} — ${r.name}`, draft.message || '', pdfPath, draft.sha256_original, expiryDays > 0 ? addDays(expiryDays) : null, reminderDays, draft.page_count);
+        db.prepare(`INSERT INTO envelopes (id, user_id, org_id, folder_id, access_code, title, message, status, original_pdf, sha256_original, sequential, sent_at, expires_at, reminder_days, page_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, 1, datetime('now'), ?, ?, ?)`)
+          .run(eid, req.user.id, req.user.org_id, folderId, code, `${draft.title} — ${r.name}`, draft.message || '', pdfPath, draft.sha256_original, expiryDays > 0 ? addDays(expiryDays) : null, reminderDays, draft.page_count);
         const [s] = insertSigners(eid, [{ name: r.name, email: r.email, attachments, private_message: '' }], fields.map((f) => ({ ...f, signerIndex: 0 })));
         results.push({ name: r.name, email: r.email, signing_url: `${appUrl()}/sign/${s.token}` });
       });
@@ -354,13 +369,14 @@ export function registerEnvelopeRoutes(app) {
 
     // Emails go out in the background so 500 recipients don't block the request.
     (async () => { for (const id of envIds) { try { await notifyPendingSigners(id); } catch (e) { console.error('[bulk] notify failed', id, e.message); } } })();
-    res.json({ status: 'sent', count: results.length, emailed: mailEnabled(), links: results });
+    const route = await mailRouteFor(req.user.id);
+    res.json({ status: 'sent', count: results.length, emailed: !!route, email_via: route?.via || null, email_account: route?.account || null, links: results });
   });
 
   // ---------- Lifecycle actions ----------
   app.post('/api/envelopes/:id/void', requireAuth, (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     if (env.status === 'completed') return res.status(409).json({ error: 'Completed envelopes cannot be voided' });
     if (env.status !== 'sent') return res.status(409).json({ error: `Envelope is ${env.status}` });
     db.prepare(`UPDATE envelopes SET status = 'voided' WHERE id = ?`).run(env.id);
@@ -371,8 +387,8 @@ export function registerEnvelopeRoutes(app) {
 
   // Send a reminder now to every pending signer whose turn it is.
   app.post('/api/envelopes/:id/remind', requireAuth, async (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     if (env.status !== 'sent') return res.status(409).json({ error: `Envelope is ${env.status}` });
     const targets = getSigners(env.id).filter((s) => s.status === 'pending' && isSignerTurn(env, s));
     if (!targets.length) return res.status(409).json({ error: 'Nobody is waiting to sign right now' });
@@ -381,26 +397,26 @@ export function registerEnvelopeRoutes(app) {
       audit(env.id, 'reminder.sent', actorOf(req.user), `Manual reminder to ${s.email}`, clientIp(req));
     }
     db.prepare(`UPDATE envelopes SET last_reminder_at = datetime('now') WHERE id = ?`).run(env.id);
-    res.json({ ok: true, reminded: targets.map((s) => s.email), emailed: mailEnabled() });
+    res.json({ ok: true, reminded: targets.map((s) => s.email), emailed: !!(await mailRouteFor(env.user_id)) });
   });
 
   // Resend one signer's link (unchanged token).
   app.post('/api/envelopes/:id/signers/:sid/resend', requireAuth, async (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     const s = db.prepare(`SELECT * FROM signers WHERE id = ? AND envelope_id = ?`).get(req.params.sid, env.id);
     if (!s) return res.status(404).json({ error: 'Signer not found' });
     if (env.status !== 'sent' || s.status !== 'pending') return res.status(409).json({ error: 'This signer is not waiting to sign' });
     if (!isSignerTurn(env, s)) return res.status(409).json({ error: `It is not ${s.name}'s turn yet (signing is in order)` });
     await sendSignRequestTo(env, s, { isReminder: true });
     audit(env.id, 'reminder.sent', actorOf(req.user), `Link re-sent to ${s.email}`, clientIp(req));
-    res.json({ ok: true, emailed: mailEnabled(), signing_url: `${appUrl()}/sign/${s.token}` });
+    res.json({ ok: true, emailed: !!(await mailRouteFor(env.user_id)), signing_url: `${appUrl()}/sign/${s.token}` });
   });
 
   // Correct a pending signer's name/email. A new link is issued and the old one stops working.
   app.patch('/api/envelopes/:id/signers/:sid', requireAuth, async (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     const s = db.prepare(`SELECT * FROM signers WHERE id = ? AND envelope_id = ?`).get(req.params.sid, env.id);
     if (!s) return res.status(404).json({ error: 'Signer not found' });
     if (env.status !== 'sent' || s.status !== 'pending') return res.status(409).json({ error: 'Only pending signers on a sent envelope can be changed' });
@@ -414,13 +430,13 @@ export function registerEnvelopeRoutes(app) {
     audit(env.id, 'signer.changed', actorOf(req.user), `Signer updated: ${s.name} <${s.email}> → ${name} <${email}>. Old link revoked.`, clientIp(req));
     const fresh = db.prepare(`SELECT * FROM signers WHERE id = ?`).get(s.id);
     if (isSignerTurn(env, fresh)) await sendSignRequestTo(env, fresh);
-    res.json({ ok: true, signing_url: `${appUrl()}/sign/${token}`, emailed: mailEnabled() });
+    res.json({ ok: true, signing_url: `${appUrl()}/sign/${token}`, emailed: !!(await mailRouteFor(env.user_id)) });
   });
 
   // Retry sealing after a failure (or seal an envelope whose signers are all done).
   app.post('/api/envelopes/:id/seal', requireAuth, async (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
+    const env = ownEditable(req, res);
+    if (!env) return;
     const signers = getSigners(env.id);
     if (!signers.length || signers.some((s) => s.status !== 'signed')) return res.status(409).json({ error: 'Not all signers have signed yet' });
     if (env.final_pdf && !env.seal_error) return res.status(409).json({ error: 'Already sealed' });
@@ -434,16 +450,16 @@ export function registerEnvelopeRoutes(app) {
   });
 
   app.post('/api/envelopes/:id/archive', requireAuth, async (req, res) => {
-    const env = ownEnvelope(req);
-    if (!env) return res.status(404).json({ error: 'Not found' });
-    if (!oneDriveEnabled()) return res.status(503).json({ error: 'OneDrive archiving is not configured on this server' });
+    const env = ownEditable(req, res);
+    if (!env) return;
+    if (!archiveEnabledFor(env.user_id)) return res.status(503).json({ error: 'No archive destination: connect OneDrive or Google Drive in Settings → Connected accounts' });
     if (env.status !== 'completed') return res.status(409).json({ error: 'Only completed envelopes can be archived' });
     try {
       const r = await archiveEnvelope(env.id);
       res.json({ ok: true, url: r.url, path: r.path });
     } catch (err) {
       audit(env.id, 'archive.failed', actorOf(req.user), `OneDrive archive failed: ${err.message.slice(0, 220)}`, clientIp(req));
-      res.status(502).json({ error: `OneDrive upload failed: ${err.message}` });
+      res.status(err.code === 'RECONNECT' ? 409 : 502).json({ error: `Archive failed: ${err.message}` });
     }
   });
 }

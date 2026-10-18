@@ -29,12 +29,16 @@ signer's email, void, retry sealing; audit trail with IP and device.
 final, append-only audit log, AES-256 encryption at rest for every PDF,
 signature image and uploaded ID. Completed documents cannot be deleted.
 
-**Accounts** — email + password, Google and Microsoft sign-in, emailed one-time
-code login, password reset, login throttling, optional domain allow-list.
+**Accounts & workspaces** — email + password, Google and Microsoft sign-in,
+emailed one-time code login, password reset, login throttling. Workspaces with
+owner/admin/member roles, invitations, shared folders and templates, and an
+admin choice between individual and shared sending/storage.
 
-**Integrations** — REST API with API keys, HMAC-signed webhooks with retries,
-automatic archive of sealed PDFs to OneDrive / SharePoint (one folder per
-sender, auto-shared with them).
+**Connected accounts** — one-click "Connect Microsoft 365 / Google": signing
+emails go out from the user's own inbox and completed documents land in the
+OneDrive or Google Drive folder they picked. No per-customer server setup.
+
+**Integrations** — REST API with API keys, HMAC-signed webhooks with retries.
 
 ## Stack
 
@@ -133,38 +137,79 @@ document is also copied into your Microsoft 365 tenant automatically.
 
 | Method | What to configure |
 |---|---|
-| **Emailed one-time code** | Nothing extra — works as soon as SMTP is set up. 6-digit code, valid 10 minutes, 5 attempts. |
-| **Google** | Google Cloud console → *APIs & Services → Credentials → OAuth client ID → Web application*. Redirect URI `https://YOUR-APP/api/auth/sso/google/callback`. Set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`. |
-| **Microsoft** | entra.microsoft.com → *App registrations → New registration*, platform *Web*, redirect URI `https://YOUR-APP/api/auth/sso/microsoft/callback`; *Certificates & secrets → New client secret* (copy the **Value**). Set `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT`. |
+| **Emailed one-time code** | Nothing extra — works as soon as the platform sender (SMTP) is set up. |
+| **Google** | The platform Google OAuth app (see *Operator setup* below). Set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`. |
+| **Microsoft** | The platform Microsoft app (see *Operator setup*). Set `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT`. |
 
 Accounts are matched by email. Set `SSO_ALLOWED_DOMAINS` for a company-only
 deployment. Accounts created via SSO/code have no password; *Forgot password*
 lets them set one.
 
-## OneDrive / SharePoint archive
+## Connected accounts: send from your inbox, save to your drive
 
-Every completed document is copied to Microsoft 365 as the **sender's sealed
-PDF** (signatures + certificate + audit trail). Default layout with one archive
-account (`ONEDRIVE_USER=shubham@softshala.com`):
+Nobody except the operator ever touches a server or an admin portal. Each user
+opens **Settings → Connected accounts** and clicks **Connect Microsoft 365** or
+**Connect Google**. A normal consent screen asks for permission to send mail as
+them and to write files to their drive (`Mail.Send` + `Files.ReadWrite`, or
+`gmail.send` + `drive.file`). From then on:
 
-```
-SignFlow/
-  Shubham Sharma/                  ← shared read-only with shubham@softshala.com
-    2026-10-17_14-32-05_Asha Verma.pdf
-  Priya Mehta/                     ← shared with priya@softshala.com
-```
+- **Signing requests, reminders and completion copies are sent from the user's
+  own mailbox** (they appear in their Sent Items). If nothing is connected, the
+  platform sender is used with *Reply-To* set to the user, so replies still
+  reach them. If a connected inbox fails, the platform sender is the fallback.
+- **Completed documents are saved to the folder they picked** in OneDrive or
+  Google Drive (a folder picker lets them browse or create folders). Inside it:
+  `<SignFlow folder or Unfiled>/<date>_<time>_<signer>.pdf`.
+- Tokens are stored encrypted and refreshed automatically; a broken connection
+  shows a *Reconnect* button and the audit trail records what happened.
 
-Times use `ONEDRIVE_TIMEZONE` (default `Asia/Kolkata`). The naming template
-`ONEDRIVE_PATH` defaults to `{sender_name}/{date}_{time}_{signer}`; tokens:
-`{sender_name} {sender_email} {folder} {title} {id} {date} {time} {signer}
-{signer_first} {signer_last} {signers}`. `ONEDRIVE_USER=@sender` archives into
-each sender's own OneDrive; `ONEDRIVE_SITE=…sharepoint.com/sites/Contracts`
-uses a SharePoint library.
+## Workspaces
 
-Setup: in the Microsoft app registration add the Graph **Application**
-permission `Files.ReadWrite.All` (or `Sites.ReadWrite.All` for SharePoint) and
-grant admin consent. These app-only permissions are tenant-wide; for least
-privilege use `Sites.Selected`.
+Every user gets a personal workspace; admins invite colleagues by email
+(**Settings → Workspace**). Admins choose, per workspace:
+
+| Setting | Options |
+|---|---|
+| **Who sends the emails** | Each member from their own connected inbox (default), or one shared inbox for the whole workspace, e.g. `contracts@company.com`, connected once by any member |
+| **Where completed documents are saved** | Each member's own drive and folder, or one shared drive folder (with a sub-folder per sender) |
+| **Who sees which documents** | Members see only their own (admins see all), or everyone sees everything |
+
+Roles: owner (one), admin, member. Folders and templates are shared across the
+workspace. Members who leave keep their documents in the workspace and get a
+fresh personal workspace.
+
+## Operator setup (once, for the whole platform)
+
+This is the only server-side configuration, and it is the operator's, not the
+customers'. It is what Zoho and Adobe do behind the scenes.
+
+1. **Microsoft app** — entra.microsoft.com → App registrations → New
+   registration. Supported account types: **Accounts in any organizational
+   directory and personal Microsoft accounts** (multi-tenant). Redirect URIs
+   (Web): `https://YOUR-APP/api/auth/sso/microsoft/callback` and
+   `https://YOUR-APP/api/connect/microsoft/callback`. Create a client secret.
+   Set `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT=common`. Delegated
+   permissions are requested dynamically; no admin consent is needed in tenants
+   that allow user consent. Complete Microsoft *publisher verification* to
+   remove the "unverified" warning.
+2. **Google app** — console.cloud.google.com → OAuth consent screen (External,
+   published) → Credentials → OAuth client ID (Web). Redirect URIs:
+   `https://YOUR-APP/api/auth/sso/google/callback` and
+   `https://YOUR-APP/api/connect/google/callback`. Enable the Gmail API and
+   Google Drive API. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+   **Note:** `gmail.send` is a Google *restricted* scope — public release
+   requires Google's verification and an annual third-party security
+   assessment. `drive.file` only needs brand verification. Until then, Google
+   users' email goes through the platform sender.
+3. **Platform sender** — any transactional SMTP (Brevo, Postmark, SES, or a
+   mailbox): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `FROM_EMAIL`.
+   Used for login codes, password resets, and as the default/fallback for users
+   who have not connected an inbox.
+4. **Hosting** — persistent disk + `STORAGE_DIR`, `SIGNFLOW_SECRET`, `APP_URL`,
+   `COOKIE_SECURE=1`. Check `/api/health`.
+
+The older app-only `ONEDRIVE_*` variables still work as an operator-level
+fallback archive when a user has connected nothing.
 
 ## API
 
@@ -187,6 +232,9 @@ Create a key in *Settings → API & webhooks* and send it as
 | GET / POST / DELETE | `/api/folders`, `/api/folders/:id` | Folders |
 | GET / POST / PATCH / DELETE | `/api/templates`, `/api/templates/:id`, `/api/templates/:id/use` | Templates |
 | GET / PUT | `/api/settings` · `/api/settings/password` · `/api/settings/api-keys` · `/api/settings/webhook/test` | Account settings |
+| GET | `/api/connections` · `/api/connect/:provider` (→ consent) · `/api/connections/:id/folders` | Connected accounts, folder picker |
+| PUT / DELETE | `/api/connections/mail-choice` · `/api/connections/archive-target` · `/api/connections/:id` | Choose inbox / drive folder, disconnect |
+| GET / PUT | `/api/org` · `/api/org/invites` · `/api/org/members/:id` · `/api/org/join/:token` · `/api/org/test-email` | Workspace, members, invitations |
 | GET | `/api/sign/:token` · `/pdf` · `/download` | Signer's view / PDF / signed copy |
 | POST | `/api/sign/:token` · `/decline` | Submit consent + signature + values + attachments / decline |
 
@@ -206,6 +254,10 @@ server/src/
   sso.js        – Google / Microsoft sign-in (OpenID Connect + PKCE)
   otp.js        – emailed one-time code login
   settings.js   – profile, branding, defaults, webhook, API keys
+  connections.js– OAuth "connect your account" (Microsoft/Google), tokens, folder picker
+  storage.js    – archive to the user's/workspace's OneDrive or Google Drive
+  orgs.js       – workspaces, members, invitations, shared sending/storage
+  scope.js      – who may see / edit which envelopes
   envelopes.js  – sender routes: upload, list, send, bulk, lifecycle
   signing.js    – signer routes: view, sign, decline, download
   templates.js  – reusable templates
@@ -215,7 +267,7 @@ server/src/
   webhooks.js   – signed webhook delivery queue
   pdf.js        – pdf-lib stamping (rotation-aware), certificate, validation
   onedrive.js   – Microsoft Graph archive
-  mailer.js     – branded, escaped email templates
+  mailer.js     – send via the user's Microsoft 365 / Gmail, or the platform sender
   crypto.js     – AES-256-GCM at rest
   db.js         – SQLite schema + migrations
 client/src/

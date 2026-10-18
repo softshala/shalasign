@@ -49,7 +49,8 @@ export default function EnvelopeDetail() {
             <h2 style={{ margin: '0 0 6px', wordBreak: 'break-word' }}>{env.title} <span className={`pill ${env.status}`}>{STATUS_LABEL[env.status] || env.status}</span></h2>
             <dl className="kv">
               <dt>Envelope</dt><dd><code>{env.id}</code>{env.page_count ? ` · ${env.page_count} page${env.page_count > 1 ? 's' : ''}` : ''}</dd>
-              <dt>Sent</dt><dd>{fmtDate(env.sent_at || env.created_at)}{env.sequential && env.signers.length > 1 ? ' · signers in order' : ''}</dd>
+              {env.owner && !env.owner.mine && <><dt>Sent by</dt><dd>{env.owner.name} <span className="muted">{env.owner.email}</span>{!env.can_edit && <span className="muted"> · view only</span>}</dd></>}
+              <dt>Sent</dt><dd>{fmtDate(env.sent_at || env.created_at)}{env.sequential && env.signers.length > 1 ? ' · signers in order' : ''}{env.mail_route ? <span className="muted"> · emails from {env.mail_route.account}</span> : <span className="error"> · no email route — share links manually</span>}</dd>
               {env.status === 'sent' && <><dt>Deadline</dt><dd style={{ color: left != null && left <= 3 ? 'var(--warn)' : undefined }}>{env.expires_at ? `${fmtDate(env.expires_at)}${left != null ? ` (${left <= 0 ? 'passed' : `${left} day${left === 1 ? '' : 's'} left`})` : ''}` : 'none'}{env.reminder_days ? ` · auto-reminders every ${env.reminder_days}d` : ''}</dd></>}
               {env.completed_at && <><dt>Completed</dt><dd>{fmtDate(env.completed_at)}</dd></>}
               {env.cc?.length > 0 && <><dt>CC</dt><dd>{env.cc.map((c) => c.email).join(', ')}</dd></>}

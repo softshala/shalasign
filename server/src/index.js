@@ -12,6 +12,8 @@ import { registerSettingsRoutes } from './settings.js';
 import { registerTemplateRoutes } from './templates.js';
 import { registerEnvelopeRoutes } from './envelopes.js';
 import { registerSigningRoutes } from './signing.js';
+import { registerConnectionRoutes } from './connections.js';
+import { registerOrgRoutes } from './orgs.js';
 import { startScheduler } from './scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,10 +54,11 @@ app.get('/api/health', (_req, res) => {
     storage_is_persistent_disk: persistent,
     encryption_key_source: process.env.SIGNFLOW_SECRET ? 'env' : 'file-in-storage-dir',
     email_configured: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+    connect_providers: { microsoft: !!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET), google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) },
     warnings: [
       ...(!persistent ? ['Storage is NOT a persistent disk: accounts, documents and sessions are erased on every deploy/restart. Attach a disk and set STORAGE_DIR to its mount path.'] : []),
       ...(process.env.RENDER && !process.env.SIGNFLOW_SECRET ? ['SIGNFLOW_SECRET is not set: the encryption key lives on the data disk, so disk backups can be decrypted by whoever holds them.'] : []),
-      ...(!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) ? ['Email is not configured: signing links must be shared manually and reminders/notifications are off.'] : []),
+      ...(!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) ? ['Platform email (SMTP_*) is not configured: users must connect their own inbox to send; login codes and password resets are off.'] : []),
     ],
   });
 });
@@ -68,6 +71,8 @@ registerSettingsRoutes(app);
 registerTemplateRoutes(app);
 registerEnvelopeRoutes(app);
 registerSigningRoutes(app);
+registerConnectionRoutes(app);
+registerOrgRoutes(app);
 
 // JSON 404 for unknown API routes, and a JSON error handler.
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));

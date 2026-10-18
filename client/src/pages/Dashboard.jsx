@@ -141,7 +141,7 @@ export default function Dashboard() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Document</th><th>Signers</th><th>Status</th><th className="hide-mobile">Folder</th><th>Updated</th><th></th></tr>
+                <tr><th>Document</th>{list.shows_workspace && <th className="hide-mobile">Sent by</th>}<th>Signers</th><th>Status</th><th className="hide-mobile">Folder</th><th>Updated</th><th></th></tr>
               </thead>
               <tbody>
                 {list.items.map((e) => {
@@ -153,6 +153,7 @@ export default function Dashboard() {
                         <strong>{e.title}</strong>
                         <div className="muted small">{e.page_count ? `${e.page_count} page${e.page_count > 1 ? 's' : ''}` : ''}{e.template_id ? ' · from template' : ''}{e.archive_url ? ' · ☁️ archived' : ''}</div>
                       </td>
+                      {list.shows_workspace && <td className="muted hide-mobile">{e.mine ? 'You' : e.owner_name}</td>}
                       <td>
                         {e.signers_total ? (<>
                           <div>{e.signers_signed}/{e.signers_total} signed</div>
@@ -175,7 +176,7 @@ export default function Dashboard() {
                   );
                 })}
                 {!loading && list.items.length === 0 && (
-                  <tr><td colSpan="6">
+                  <tr><td colSpan={list.shows_workspace ? 7 : 6}>
                     <div className="empty">
                       <div style={{ fontSize: 34 }}>📄</div>
                       <h3>{filters.q || filters.status !== 'all' || filters.folder !== 'all' ? 'No documents match' : 'No documents yet'}</h3>

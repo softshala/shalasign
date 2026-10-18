@@ -221,6 +221,57 @@ CREATE INDEX IF NOT EXISTS idx_audit_env ON audit_events(envelope_id);
 CREATE INDEX IF NOT EXISTS idx_env_user ON envelopes(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_signers_env ON signers(envelope_id);
 
+-- Organisations / workspaces. Every user belongs to exactly one org.
+CREATE TABLE IF NOT EXISTS orgs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  email_mode TEXT NOT NULL DEFAULT 'individual',      -- individual: each member sends from their own connected inbox (or platform)
+                                                      -- shared: everyone sends from one connected inbox chosen by an admin
+  shared_mail_connection_id TEXT,
+  storage_mode TEXT NOT NULL DEFAULT 'individual',    -- individual | shared
+  shared_storage_connection_id TEXT,
+  shared_storage_root_id TEXT,
+  shared_storage_root_path TEXT,
+  visibility TEXT NOT NULL DEFAULT 'own',             -- own: members see their own envelopes; all: everyone sees the org's envelopes
+  plan TEXT NOT NULL DEFAULT 'free',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS org_invites (
+  token_hash TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  invited_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  accepted_at TEXT
+);
+
+-- OAuth connections to the user's own Microsoft 365 / Google account.
+-- Tokens are encrypted at rest (crypto.encStr).
+CREATE TABLE IF NOT EXISTS connections (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  org_id TEXT,
+  provider TEXT NOT NULL,                             -- microsoft | google
+  account_email TEXT NOT NULL,
+  account_name TEXT DEFAULT '',
+  external_id TEXT,                                   -- Microsoft oid / Google sub
+  tenant_id TEXT,                                     -- Microsoft tenant (tid)
+  scopes TEXT NOT NULL DEFAULT '',                    -- space separated, as granted
+  refresh_token TEXT,                                 -- encrypted
+  access_token TEXT,                                  -- encrypted cache
+  access_expires_at TEXT,
+  can_mail INTEGER NOT NULL DEFAULT 0,
+  can_storage INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, provider)
+);
+
 -- Outgoing webhook deliveries (for retries + visibility).
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,6 +298,28 @@ for (const def of [
 ]) addColumn('envelopes', def);
 for (const def of ['declined_at TEXT', 'decline_reason TEXT', "private_message TEXT DEFAULT ''", 'viewed_at TEXT', 'notified_at TEXT', 'reminders_sent INTEGER NOT NULL DEFAULT 0']) addColumn('signers', def);
 addColumn('fields', 'required INTEGER NOT NULL DEFAULT 1');
+addColumn('users', 'org_id TEXT');
+addColumn('users', "role TEXT NOT NULL DEFAULT 'member'");          // owner | admin | member (within the org)
+addColumn('envelopes', 'org_id TEXT');
+addColumn('templates', 'org_id TEXT');
+addColumn('folders', 'org_id TEXT');
+for (const def of ['mail_connection_id TEXT', 'archive_connection_id TEXT', 'archive_root_id TEXT', 'archive_root_path TEXT']) addColumn('user_settings', def);
+db.exec('CREATE INDEX IF NOT EXISTS idx_env_org ON envelopes(org_id)');
+
+// Every existing user gets a personal workspace once (migration for pre-org databases).
+{
+  const orphans = db.prepare(`SELECT id, name FROM users WHERE org_id IS NULL`).all();
+  const insOrg = db.prepare(`INSERT INTO orgs (id, name, owner_user_id) VALUES (?, ?, ?)`);
+  const setUser = db.prepare(`UPDATE users SET org_id = ?, role = 'owner' WHERE id = ?`);
+  for (const u of orphans) {
+    const orgId = 'org_' + u.id;
+    insOrg.run(orgId, `${u.name}'s workspace`, u.id);
+    setUser.run(orgId, u.id);
+    db.prepare(`UPDATE envelopes SET org_id = ? WHERE user_id = ? AND org_id IS NULL`).run(orgId, u.id);
+    db.prepare(`UPDATE templates SET org_id = ? WHERE user_id = ? AND org_id IS NULL`).run(orgId, u.id);
+    db.prepare(`UPDATE folders SET org_id = ? WHERE user_id = ? AND org_id IS NULL`).run(orgId, u.id);
+  }
+}
 
 export default db;
 
@@ -262,6 +335,19 @@ export function getSettings(userId) {
   return {
     company: '', brand_color: '', logo_data: '', email_footer: '',
     default_expiry_days: 30, default_reminder_days: 3, webhook_url: '', webhook_secret: '', notify_on_view: 0,
+    mail_connection_id: null, archive_connection_id: null, archive_root_id: null, archive_root_path: null,
     ...(row || {}),
   };
+}
+
+export const getOrg = (orgId) => (orgId ? db.prepare(`SELECT * FROM orgs WHERE id = ?`).get(orgId) : null);
+export const getUser = (userId) => db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId);
+export const isOrgAdmin = (user) => user?.role === 'owner' || user?.role === 'admin';
+
+/** Create a personal workspace for a brand-new user. */
+export function createOrgForUser(userId, userName) {
+  const orgId = 'org_' + userId;
+  db.prepare(`INSERT INTO orgs (id, name, owner_user_id) VALUES (?, ?, ?)`).run(orgId, `${userName}'s workspace`, userId);
+  db.prepare(`UPDATE users SET org_id = ?, role = 'owner' WHERE id = ?`).run(orgId, userId);
+  return orgId;
 }

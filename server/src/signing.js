@@ -74,7 +74,7 @@ export function registerSigningRoutes(app) {
       db.prepare(`UPDATE signers SET viewed_at = datetime('now') WHERE id = ?`).run(signer.id);
       audit(env.id, 'envelope.viewed', `${signer.name} <${signer.email}>`, 'Opened the signing page for the first time', clientIp(req));
       const settings = getSettings(env.user_id);
-      if (settings.notify_on_view && mailEnabled()) {
+      if (settings.notify_on_view) {
         const brand = brandFor(env.user_id);
         if (brand.senderEmail) sendViewedNotice({ to: brand.senderEmail, envelope: env, signerName: signer.name, brand }).catch(() => {});
       }

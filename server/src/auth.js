@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { nanoid } from 'nanoid';
-import db from './db.js';
+import db, { createOrgForUser, getOrg } from './db.js';
 import { appUrl, mailEnabled, sendPasswordReset } from './mailer.js';
 import { clientIp, makeLimiter, validEmail } from './util.js';
 
@@ -36,6 +36,7 @@ export function findOrCreateUser(email, name) {
   const id = nanoid(10);
   const displayName = (name || key.split('@')[0]).trim().slice(0, 80);
   db.prepare(`INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)`).run(id, displayName, key, NO_PASSWORD);
+  createOrgForUser(id, displayName);
   return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id);
 }
 
@@ -60,7 +61,10 @@ function recordFail(email) {
 }
 function clearFails(email) { fails.delete(email); }
 
-const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, has_password: u.password_hash !== NO_PASSWORD });
+const publicUser = (u) => {
+  const org = getOrg(u.org_id);
+  return { id: u.id, name: u.name, email: u.email, has_password: u.password_hash !== NO_PASSWORD, role: u.role || 'member', org: org ? { id: org.id, name: org.name, email_mode: org.email_mode, storage_mode: org.storage_mode, visibility: org.visibility } : null };
+};
 
 export function registerAuthRoutes(app) {
   // Shared per-IP limiter for all auth endpoints.
@@ -70,8 +74,8 @@ export function registerAuthRoutes(app) {
     next();
   });
 
-  app.post('/api/auth/signup', (req, res) => {
-    const { name, email, password } = req.body || {};
+  app.post('/api/auth/signup', async (req, res) => {
+    const { name, email, password, invite } = req.body || {};
     if (!name?.trim() || !email?.trim() || !password) return res.status(400).json({ error: 'Name, email and password are required' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
     if (!validEmail(email)) return res.status(400).json({ error: 'Please enter a valid email address' });
@@ -81,8 +85,14 @@ export function registerAuthRoutes(app) {
     const id = nanoid(10);
     db.prepare(`INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)`)
       .run(id, name.trim().slice(0, 80), key, bcrypt.hashSync(password, 10));
+    createOrgForUser(id, name.trim());
+    let joined = null;
+    if (invite) {
+      try { const { acceptInvite } = await import('./orgs.js'); joined = acceptInvite(db.prepare(`SELECT * FROM users WHERE id = ?`).get(id), String(invite)); }
+      catch (e) { console.warn('[signup] invite not applied:', e.message); }
+    }
     startSession(res, id);
-    res.json({ id, name: name.trim(), email: key, has_password: true });
+    res.json({ ...publicUser(db.prepare(`SELECT * FROM users WHERE id = ?`).get(id)), joined_org: joined ? joined.name : null });
   });
 
   app.post('/api/auth/login', (req, res) => {

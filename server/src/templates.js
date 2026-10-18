@@ -2,7 +2,8 @@
 import fs from 'fs';
 import path from 'path';
 import { nanoid } from 'nanoid';
-import db, { audit, STORAGE_DIR } from './db.js';
+import db, { audit, STORAGE_DIR, isOrgAdmin } from './db.js';
+import { findEnvelope, canEdit } from './scope.js';
 import { requireAuth } from './auth.js';
 import { readDecrypted, writeEncrypted } from './crypto.js';
 import { normalizeFields } from './fields.js';
@@ -17,18 +18,18 @@ const rowToTemplate = (t) => ({
 
 export function registerTemplateRoutes(app) {
   app.get('/api/templates', requireAuth, (req, res) => {
-    const rows = db.prepare(`SELECT * FROM templates WHERE user_id = ? ORDER BY created_at DESC`).all(req.user.id);
-    res.json(rows.map(rowToTemplate));
+    const rows = db.prepare(`SELECT t.*, u.name AS owner_name FROM templates t LEFT JOIN users u ON u.id = t.user_id WHERE t.org_id = ? ORDER BY t.created_at DESC`).all(req.user.org_id);
+    res.json(rows.map((t) => ({ ...rowToTemplate(t), owner_name: t.owner_name, mine: t.user_id === req.user.id })));
   });
 
   app.get('/api/templates/:id', requireAuth, (req, res) => {
-    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND user_id = ?`).get(req.params.id, req.user.id);
+    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND org_id = ?`).get(req.params.id, req.user.org_id);
     if (!t) return res.status(404).json({ error: 'Not found' });
     res.json(rowToTemplate(t));
   });
 
   app.get('/api/templates/:id/pdf', requireAuth, (req, res) => {
-    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND user_id = ?`).get(req.params.id, req.user.id);
+    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND org_id = ?`).get(req.params.id, req.user.org_id);
     if (!t) return res.status(404).json({ error: 'Not found' });
     res.contentType('application/pdf').send(readDecrypted(t.pdf_path));
   });
@@ -36,8 +37,8 @@ export function registerTemplateRoutes(app) {
   // Save the current Prepare state of a draft envelope as a template.
   app.post('/api/templates', requireAuth, (req, res) => {
     const { envelope_id, name, roles = [], fields = [], options = {} } = req.body || {};
-    const env = db.prepare(`SELECT * FROM envelopes WHERE id = ? AND user_id = ?`).get(envelope_id, req.user.id);
-    if (!env) return res.status(404).json({ error: 'Envelope not found' });
+    const env = findEnvelope(req.user, envelope_id);
+    if (!env || !canEdit(req.user, env)) return res.status(404).json({ error: 'Envelope not found' });
     const tname = String(name || env.title).trim().slice(0, 100);
     if (!tname) return res.status(400).json({ error: 'Template name is required' });
     const cleanRoles = (Array.isArray(roles) ? roles : []).slice(0, 10).map((r, i) => ({
@@ -59,22 +60,24 @@ export function registerTemplateRoutes(app) {
     const id = nanoid(12);
     const pdfPath = path.join(UPLOADS, `tpl-${id}.pdf`);
     writeEncrypted(pdfPath, readDecrypted(env.original_pdf));
-    db.prepare(`INSERT INTO templates (id, user_id, name, pdf_path, sha256, roles_json, fields_json, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, req.user.id, tname, pdfPath, env.sha256_original, JSON.stringify(cleanRoles), JSON.stringify(cleanFields), JSON.stringify(cleanOptions));
+    db.prepare(`INSERT INTO templates (id, user_id, org_id, name, pdf_path, sha256, roles_json, fields_json, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, req.user.id, req.user.org_id, tname, pdfPath, env.sha256_original, JSON.stringify(cleanRoles), JSON.stringify(cleanFields), JSON.stringify(cleanOptions));
     res.json({ id, name: tname });
   });
 
   app.patch('/api/templates/:id', requireAuth, (req, res) => {
-    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND user_id = ?`).get(req.params.id, req.user.id);
+    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND org_id = ?`).get(req.params.id, req.user.org_id);
     if (!t) return res.status(404).json({ error: 'Not found' });
+    if (t.user_id !== req.user.id && !isOrgAdmin(req.user)) return res.status(403).json({ error: 'Only the creator or an admin can change this template' });
     const name = String(req.body?.name || '').trim().slice(0, 100);
     if (name) db.prepare(`UPDATE templates SET name = ? WHERE id = ?`).run(name, t.id);
     res.json({ ok: true });
   });
 
   app.delete('/api/templates/:id', requireAuth, (req, res) => {
-    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND user_id = ?`).get(req.params.id, req.user.id);
+    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND org_id = ?`).get(req.params.id, req.user.org_id);
     if (!t) return res.status(404).json({ error: 'Not found' });
+    if (t.user_id !== req.user.id && !isOrgAdmin(req.user)) return res.status(403).json({ error: 'Only the creator or an admin can delete this template' });
     db.prepare(`DELETE FROM templates WHERE id = ?`).run(t.id);
     try { fs.unlinkSync(t.pdf_path); } catch { /* already gone */ }
     res.json({ ok: true });
@@ -83,7 +86,7 @@ export function registerTemplateRoutes(app) {
   // Create a new draft envelope from a template. The Prepare page opens it with
   // the roles, fields and options pre-filled (stored in draft_json).
   app.post('/api/templates/:id/use', requireAuth, (req, res) => {
-    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND user_id = ?`).get(req.params.id, req.user.id);
+    const t = db.prepare(`SELECT * FROM templates WHERE id = ? AND org_id = ?`).get(req.params.id, req.user.org_id);
     if (!t) return res.status(404).json({ error: 'Not found' });
     const tpl = rowToTemplate(t);
     const id = nanoid(12);
@@ -101,8 +104,8 @@ export function registerTemplateRoutes(app) {
       cc: tpl.options.cc || [],
       folder_id: req.body?.folder_id || null,
     };
-    db.prepare(`INSERT INTO envelopes (id, user_id, title, message, original_pdf, sha256_original, template_id, draft_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, req.user.id, title, draft.message, pdfPath, t.sha256, t.id, JSON.stringify(draft));
+    db.prepare(`INSERT INTO envelopes (id, user_id, org_id, title, message, original_pdf, sha256_original, template_id, draft_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, req.user.id, req.user.org_id, title, draft.message, pdfPath, t.sha256, t.id, JSON.stringify(draft));
     db.prepare(`UPDATE templates SET use_count = use_count + 1 WHERE id = ?`).run(t.id);
     audit(id, 'envelope.created', actorOf(req.user), `Created from template "${t.name}"`, clientIp(req));
     res.json({ id, title });

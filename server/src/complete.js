@@ -7,7 +7,7 @@ import { sealEnvelope, sha256 } from './pdf.js';
 import { writeEncrypted } from './crypto.js';
 import { appUrl, brandFor, sendSignRequest, sendCompletionEmail } from './mailer.js';
 import { queueWebhook } from './webhooks.js';
-import { archiveInBackground } from './onedrive.js';
+import { archiveInBackground } from './storage.js';
 import { nowSql, safeFilename } from './util.js';
 
 const UPLOADS = path.join(STORAGE_DIR, 'uploads');
@@ -43,7 +43,7 @@ export async function sendSignRequestTo(env, signer, { isReminder = false } = {}
   const r = await sendSignRequest({ signer, envelope: env, senderNote: env.message, brand, isReminder, privateMessage: signer.private_message });
   const what = isReminder ? 'Reminder' : 'Signing request';
   audit(env.id, r.sent ? 'email.sent' : 'email.skipped', 'system',
-    `${what} ${r.sent ? 'emailed to' : 'not emailed (SMTP ' + (r.error ? 'error: ' + r.error : 'not configured') + ') for'} ${signer.email}`);
+    `${what} ${r.sent ? `emailed to ${signer.email} from ${r.account} (${r.via})${r.fallback_from ? ` after ${r.fallback_from} failed` : ''}` : `not emailed to ${signer.email} (${r.error ? 'error: ' + r.error : 'no email route configured'})`}`);
   db.prepare(`UPDATE signers SET notified_at = datetime('now')${isReminder ? ', reminders_sent = reminders_sent + 1' : ''} WHERE id = ?`).run(signer.id);
   return r;
 }
@@ -107,8 +107,8 @@ export async function sealAndNotify(envelopeId) {
   const sealedEnv = getEnvelope(envelopeId);
   const fname = `${safeFilename(sealedEnv.title)}-signed.pdf`;
   for (const s of signers) {
-    const r = await sendCompletionEmail({ to: s.email, name: s.name, envelope: sealedEnv, pdfContent: signerBytes, filename: fname, brand, audience: 'signer' });
-    audit(envelopeId, r.sent ? 'email.sent' : 'email.skipped', 'system', `Completion email ${r.sent ? 'sent to' : 'not sent to'} ${s.email}`);
+    const r = await sendCompletionEmail({ to: s.email, name: s.name, envelope: sealedEnv, pdfContent: signerBytes, filename: fname, brand, audience: 'signer', downloadUrl: `${appUrl()}/sign/${s.token}/download` });
+    audit(envelopeId, r.sent ? 'email.sent' : 'email.skipped', 'system', `Completion email ${r.sent ? `sent to ${s.email} from ${r.account} (${r.via})` : `not sent to ${s.email}${r.error ? ': ' + r.error : ''}`}`);
   }
   let cc = [];
   try { cc = JSON.parse(sealedEnv.cc_json || '[]'); } catch { /* ignore */ }
@@ -118,7 +118,7 @@ export async function sealAndNotify(envelopeId) {
     audit(envelopeId, r.sent ? 'email.sent' : 'email.skipped', 'system', `CC copy ${r.sent ? 'sent to' : 'not sent to'} ${c.email}`);
   }
   if (brand.senderEmail) {
-    const r = await sendCompletionEmail({ to: brand.senderEmail, name: brand.senderName, envelope: sealedEnv, pdfContent: finalBytes, filename: fname, brand, audience: 'sender' });
+    const r = await sendCompletionEmail({ to: brand.senderEmail, name: brand.senderName, envelope: sealedEnv, pdfContent: finalBytes, filename: fname, brand, audience: 'sender', downloadUrl: `${appUrl()}/envelope/${envelopeId}` });
     audit(envelopeId, r.sent ? 'email.sent' : 'email.skipped', 'system', `Sender copy ${r.sent ? 'sent to' : 'not sent to'} ${brand.senderEmail}`);
   }
 

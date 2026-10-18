@@ -21,7 +21,7 @@ export default function Layout({ children, wide = false, subtitle }) {
         </nav>
         {subtitle && <span className="muted hide-mobile">{subtitle}</span>}
         <span className="right">
-          {user && <span className="muted hide-mobile">{user.name}</span>}
+          {user && <span className="muted hide-mobile" title={user.org?.name}>{user.name}{user.org ? ` · ${user.org.name}` : ''}</span>}
           <Link to="/settings" className="btn ghost small" title="Settings" aria-label="Settings">⚙︎</Link>
           <button className="secondary small" onClick={logout}>Log out</button>
         </span>
